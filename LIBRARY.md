@@ -552,9 +552,9 @@ with `А` [трасса z14p, z14pn].
 - 010000–010007 do not hold the key block: they hold phase 2's name
   table, pairs (name, kind << 30 | value): `НАЧ` 010, `ИС` 012, `А` 014,
   `Б` 015, all kind 1. The block that phase 1 passed to the pager at
-  the `!` (step 2) went to virtual memory, so the loader must read it
-  back from the translator's pages; where that page lies on drum 20/23
-  was not determined.
+  the `!` (step 2) went to virtual memory at v035000, which is drum 020
+  tract 016, sector 2. It is on the drum by phase 2, so the loader must
+  read it back from there [трасса lib6; see [VM.md](VM.md)].
 
 **Required functions** [вывод]:
 

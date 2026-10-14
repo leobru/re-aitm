@@ -25,9 +25,9 @@ Marks as in [README.md](README.md); details in [LIBRARY.md](LIBRARY.md).
   jumps to 011, but 0414.0–2 is zeros on 2148 and 2248. No other copy
   was found on 2048, 2148 or 2248 (see LIBRARY.md, "Search of the
   volumes"). What it receives and must do: LIBRARY.md, "Linking loader:
-  expected behaviour". The probe (`z14p`, `z14pn`) shows that the key
-  block is no longer at 010000 when 011 is entered: where did the pager
-  put it (word `06470 << 15 | D05051`, virtual page, drum 20 or 23)?
+  expected behaviour". The key block is at v035000 (drum 020 tract 016),
+  not at 010000 (VM.md). With `А` the dirty windows are not written
+  back before the loader is entered; was the loader meant to use them?
 - Literals and reference records: section `Э;` (LIBRARY.md). Open:
   - the 04000 flag on a literal number (f2a 05513–05514, 05457 ≠ 0);
   - literal-table overflow (05507);
