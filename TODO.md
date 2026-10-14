@@ -7,27 +7,36 @@ Marks as in [README.md](README.md); details in [LIBRARY.md](LIBRARY.md).
 - How the МЛ30 catalogue is initialised on a new tape: a never-written
   zone 0 reads as the 2525… fill, and the translator has no key for it.
 - The deck for reading a text back: `Л20,` gives error 22, and
-  `Л20,В;Е;` loops at address 010. `КАТМЛ` (read by key) and `ЗПМЛ`
-  (write to МЛ31) have never run; `ЧТМЛ` and `ИЩ12` run under `Б;`.
+  `Л20,В;Е;` loops at address 010. `КАТМЛ` (read by key) has never
+  run; `ЧТМЛ` and `ИЩ12` run under `Б;`, `ЗПМЛ` under key `Ф` (`flist`).
 - Exact packing of the catalogue words 0720 + i (start zone in the low
   12 bits, the rest unknown).
 - `Б;` sections: covered by `sb1`–`sb5`. Open: the next-page step of
   an insertion (05604–05606) — needs a library text longer than a page,
   but a 120-line text breaks the write (errors 02, 11 until killed);
   why that text fails is unknown.
-- Key `Л` second digit (punching the text on cards through Э71
-  4155/4154) is untested.
+- Key `Л` second digit: `punch` runs `МЛКОП` (with key `П`), but the
+  card images produced by Э71 4155/4154 were not inspected, and how Y
+  maps to operators per card is unchecked.
 
 ## Module library (key Р, volume 067)
 
 - The linking loader. With a `(` list, `ЗАВЕР` loads zone 0414 to 0 and
   jumps to 011, but 0414.0–2 is zeros on 2148 and 2248. No other copy
   was found on 2048, 2148 or 2248 (see LIBRARY.md, "Search of the
-  volumes").
-- Which source constructs produce literals (`ЛИТПУЛ`, modifier kind 5)
-  and reference records (`ЗПКОМ`).
-- The meaning of 05740 (= 05455, bits 21–32 of the descriptor), always
-  0 so far, and of the descriptor flag (bit 48, always 1).
+  volumes"). What it receives and must do: LIBRARY.md, "Linking loader:
+  expected behaviour". The probe (`z14p`, `z14pn`) shows that the key
+  block is no longer at 010000 when 011 is entered: where did the pager
+  put it (word `06470 << 15 | D05051`, virtual page, drum 20 or 23)?
+- Literals and reference records: section `Э;` (LIBRARY.md). Open:
+  - the 04000 flag on a literal number (f2a 05513–05514, 05457 ≠ 0);
+  - literal-table overflow (05507);
+  - `ЭКСТР` with 0203 ≠ 0 (05434);
+  - is error 13 for `ВН+1` and `Р1+1` (a name at address 0) intended?
+  - the silent loss of the 1 in `СЧ1+ВН`;
+  - where `Р=2000=10` puts the area without key `Р` (`ext2` runs, but
+    the addresses were not checked).
+- The descriptor flag (bit 48, always 1).
 - The `/` and `.` list items, `)`, `:`, `-`, `,`, and the address range
   010001/010002 (numbers in the list).
 - `Р…,Б(1)!` corrupts the exchange information word.
@@ -61,6 +70,16 @@ Marks as in [README.md](README.md); details in [LIBRARY.md](LIBRARY.md).
   `В;R1=3,R2,R3,R7,R4,RA=16,` the deck `R3.ПАИС=R3.Э064` translates and
   prints (R3 = 5); without the description `R3.`/`RE.` give error 06.
   Which code in phase 2 handles the `.` is not yet located.
+- Corrections (key `И`, `corr1`–`corr8`): the manual's `И1,В;0,…!`
+  (insert right after `В;`) gives error 51 even when descriptions exist;
+  `f1a` 04622–04634 in the correction pass never run.
+- Debugger (key `О`): `Э066` is emulated through Э67 with the word
+  0000657400010010, which dispak treats as a debug trap (jump to 06574,
+  «ОБРАЩ.К НЕСУЩ.СП»), so `f2c` 05671–05700 and `D05660` cannot run
+  until dispak implements the Диспак Э67. An `Э064` with a three-word
+  information list under `О00!` printed nothing (05615 runs). `ОШ2В`
+  (05305) never runs, although `dbg` uses `Э20`, `Э21`, `Э32`, `Э33`
+  (error 00 comes from elsewhere).
 
 ## Other volume contents
 

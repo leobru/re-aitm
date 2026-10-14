@@ -74,7 +74,7 @@ and `Л ПЕЧ…` gives «ОШИБКА В ИМЕНИ» [опыт, jobs `sb1`, `
 
 | Bits | Meaning | Set by |
 |---|---|---|
-| & 7 (0363) | Y: punch the edited text (`МЛКОП`, Э71 card images) | digit Y, option `П n` |
+| & 7 (0363) | Y: punch the edited text (`МЛКОП`, Э71 card images; only with key `П`, job `punch`) | digit Y, option `П n` |
 | & 010 (0272) | write the text to МЛ30 | X = 1, 3; ЗАПИСЬ, ИЗМЕН. |
 | & 020 (0276) | read the text from the library | X = 2, 3; ЧТЕНИЕ, ИЗМЕН. |
 | & 040 (0305) | text already read / do not load it | option `Б`; set after `ЧТМЛ` |
@@ -165,6 +165,36 @@ Not confirmed: `Л20,` on the tape written above ended with ОШИБКА 22,
 and `Л20,В;Е;` looped at address 010 before reaching any library code
 [опыт]. The intended deck shape for reading (what follows `Л20,` when
 the text comes from tape) is still unknown.
+
+### Key `Ф` — blocks to МЛ31 (f1a `КЛФ`, `ФСПИС`)
+
+`Фn1,ИМЯ1,n2,ИМЯ2,…!` saves blocks of the program text to the МЛ31
+library (tape 31), each under its name [код, опыт, job `flist`]:
+
+- `КЛФ` (05027) stores the pairs at 012600 (the number doubled, then
+  the name) up to `!`; `ПРФ` holds the end of the list.
+- At the end of phase 1 `КОНФ1` calls `ФСПИС` (05700). It records the
+  position of every `В;` in the text at 012400 (2 words each; block n
+  is the n-th `В;`) and puts each name from the key into the entry of
+  its number.
+- For every named entry (05725) the text from that `В;` to the paired
+  `Е;` (nesting counted by `ПЛЮС7`/`МИН7`) is copied with a closing `!`;
+  `РЕЖМЛ` := 010 (write), `ИМЯМЛ` := the name, and `ЗПМЛ` (05663)
+  writes it through the МЛ31 words (01053, 01055). `РЕЖМЛ`/`ИМЯМЛ` of
+  the `Л` key are restored afterwards.
+
+`flist` (`Ф1,БЛОК!`, `ЛЕНТ 31(2222-ЗП)`, zeroed volume) printed
+« А-П. ЗАПИСЬ МЛ31 БЛОК 000 0000000000000001»; the catalogue has БЛОК
+at 020 (0716 = 010000, 0720 = 1) and zone 1 holds
+`В;Н;100,К;НАЧ:Э064ИС=,=Э074,…,Н;НАЧ,Е;!`. With only tape 30 ordered the
+write stops at Э70 01053 with «ОШ.В ИНФ.СЛ.ЭКСТ»; with a block number
+that does not exist (`keys`: `Ф12,ПЕЧ!`) nothing is written [опыт].
+
+МЛ30 and МЛ31 are only the unit numbers the job assigns: the writing
+job orders the volume as `ЛЕНТ 31(vol-ЗП)`, the job that assembles from
+it orders the same volume as `ЛЕНТ 30(vol)`. `fsb` (`В;Б;БЛОК,Е;` on the
+`flist` volume, read-only) prints « А-П. СБОРКА МЛ30 БЛОК» and
+«ПРИВЕТ ВСЕМУ» [опыт].
 
 ### `Б;` sections — assembly from the library (f1a `РАЗДБ`)
 
@@ -262,7 +292,7 @@ written by `КОНВЫВ`:
 |---|---|
 | 48 | flag (05743), always 1 |
 | 33–47 | image length in words (05737) |
-| 21–32 | 05740 = 05455, always 0 in the tests |
+| 21–32 | 05740 = 05455: size of the `Р` area (section `Э;`, below); 014 for `Р=10`, `Р=4` in `ext1` [опыт] |
 | 1–10 | first zone (05741) |
 
 For example `4000300000000001` is a 6-word module in zone 1, and
@@ -283,9 +313,9 @@ consecutive zones starting from the first zone (05736 zones):
 | 1 | export-table length (0173) << 36 |
 | 2 … | image of addresses 010 up to the location counter (from virtual 060010) |
 | then | relocation scale: ⌈length/8⌉ words from 01000 |
-| then | literals (023000) [код] |
-| then | reference records (virtual 010000) [код] |
-| then | export table (key `Г`): pairs (name, 1 << 45 \| address) |
+| then | literals (023000): one word per external name, the name as ITM text right-justified [опыт] |
+| then | reference records (virtual 010000), one word each [опыт] |
+| then | export table (key `Г`): pairs (name, kind << 45 \| address) [опыт] |
 
 The scale has one 3-bit field per half-word: field `3·(2·i + h)` from
 bit 48 for word 010 + i, half h (0 = left). Value 1 marks an address
@@ -304,16 +334,29 @@ otherwise). The field holds the kind itself, not a flag:
 | Kind | Source | Meaning |
 |---|---|---|
 | 0 | — | absolute |
-| 1 | `'142'` | address in the program, relocate [опыт] |
-| 5 | 05567, `ЛИТПУЛ` | the address field is a literal number (table 023000) [код] |
-| 6 | 01547, `ЛИТПУЛ` | the address field is a reference-record number (010000 + 05452) [код] |
+| 1 | `'142'` | address in the program, relocate (`СЧИС`) |
+| 2 | `ЭКСТР` 05377 | offset in the `Р` area (`СЧР2`) |
+| 3 | `МОДИФ` | minus an address in the program (`СЧ-ИС` gives 07766) |
+| 4 | `МОДИФ` | minus an offset in the `Р` area (`СЧ-Р2` gives 07770) |
+| 5 | 05567, `ЛИТПУЛ` | the address field is a literal number: the external name itself (`СЧВН`) |
+| 6 | 01547, `ЛИТПУЛ` | the address field is a reference-record number: external name + offset (`СЧВН(5)`) |
 
-`МОДИФ`/`ПРМОД` also do arithmetic on kinds for address expressions
-(±2 steps), whose meaning is unclear [код]. `ВЫВМ` copies ⌈length/8⌉
-scale words after the image. Only kinds 0 and 1 have been seen in
-tests. For
+All kinds are [опыт] (`ext1`). `МОДИФ` turns kinds 1 and 2 into 3 and
+4 for a negative term, and `ПРМОД` adds the kinds of the terms of an
+expression: `Т1-ИС` is 0 (absolute), `Т1+ИС` stays 1, `Р2-Т1` is error
+61 [опыт]. `ВЫВМ` copies ⌈length/8⌉ scale words after the image. For
 `К;Н2:СЧА=ЗЧБ,ПБН2=,Ч;А:1,Б:2,` the scale word is `1110000000000000`:
 both halves of `СЧА=ЗЧБ` and `ПБН2` are relative.
+
+With `Г`, the table is the outermost scope: every label of the outer
+block, including `Э;` names, and every global label (`*ИМЯ:`) of a
+nested block. `ПРОХ2` (f2a 04341) enters the `*` names into the outer
+table before the pass, so they come first. A plain label of a nested
+block is not exported (`В;С;ЕДИН:…,В;С;ВНУТР:1,Е;С;ДВА:2,Е;` exports
+`ЕДИН` and `ДВА`; with `*ВНУТР:` also `ВНУТР`). The same `*` makes the
+label visible in the outer block: `СЧВНУТР` there is error 06 without
+it. `В;*ВНУТР,` gives errors 20 and 55. An outer-block label cannot be
+kept private. Without `Г` the table is empty [опыт].
 
 The export table for `ПЕРВ` in `lib1` is `НАЧ 1000000000000010`,
 `ИС …012`, `А …014`, `Б …015`. It is not counted in the descriptor
@@ -354,11 +397,55 @@ add the difference between the load address and 010. A library program
 should therefore start at 010 and must not reset the counter at the end
 (`Н;НАЧ,`).
 
-Literals and reference records are written only under key `Р`:
-`ЛИТПУЛ` when the modifier kind 05451 = 5, and `ЗПКОМ` (f2b 06333) when
-05451 ≠ 0. Index registers 1–17 do not trigger them (a trial program using
-all of them got every scale field set and no literals). The source syntax that
-does is unknown [код].
+### Section `Э;`: external names and the `Р` area
+
+Literals and reference records come from section `Э;`. A label there
+goes to `ЭКСТР` (f2a 05344), which looks at what follows the `:`
+[опыт, `ext1`, `ext2`]:
+
+| Item | Effect |
+|---|---|
+| `ВК:ИС+1,` or `ВК:П=ИС,` | equivalence: `ВК` := the address, with its kind. The address must be defined above, else error 07 |
+| `ВН:Н=ВНЕШ,` | external name: the literal `ВНЕШ` is appended to 023000 (no check for duplicates), `ВН` gets kind 5 and the literal number. `Н=5` is error 61 |
+| `Р1:Р=10,` | `Р1` := the current offset in the `Р` area (05455), kind 2; the area grows by 10 (octal) |
+| `Р1:Р=2000=10,` | the same; the first number sets the start of the area, but only without key `Р` |
+
+Without key `Р` the section is accepted and the program runs (`ext2`).
+A use of an external name may come before its `Э;` item.
+
+Under key `Р` an external name is used in two ways:
+
+- `СЧВН`: kind 5, the address field holds the literal number;
+- `СЧВН(5)`: `ЛИТПУЛ` writes a reference record `literal << 30 |
+  offset` and the address field holds the record's number, kind 6. The
+  parentheses hold a constant: `(5)` is 5, `(Л)` is 0311 (the letter's
+  code), `(ИС)` is the text of `ИС`, not the label. Each use makes a new
+  record, even an identical one.
+
+`ВН+1`, `Р1+1` and `ВН-1` give error 13, because `АДР2` (f2a 05034)
+rejects `+`/`-` after a name whose address (06700) is 0. `Р2+1` is
+accepted (`Р2` = 010). In `СЧ1+ВН` the 1 is lost: the resident sets the
+address of a kind-5 name to 0 (05343).
+
+`ЗПКОМ` (from `ЛОГСЛ`, f2b) writes a reference record for each field of
+an `Л;` word whose address kind is not 0: `kind << 45 | field
+descriptor (07272) | value << 15 | word address`. In `ext1`,
+`Л1:ДВН(5)/30=КТ1/0` at 021 gives:
+
+- `6723000000100021`: field `Д` (descriptor 0723), kind 6, reference
+  record 1;
+- `1545400001400021`: field `К` (descriptor 05454), kind 1, `Т1` = 014.
+
+The word itself holds the absolute values (`0000000100000014`), and its
+scale is 0. Labels (kind 1), `Р` names (kind 2) and external names
+(kind 5) all produce records. Without an `Л;` word or an external
+name, no literals or records are written.
+
+Exports of `Э;` names keep their kind: `ВН 5000000000000000`, `Р2
+2000000000000010`.
+
+Not reached: the literal-table overflow (f2a 05507, error 61) and the
+04000 flag on a literal number (05513–05514, set when 05457 ≠ 0).
 
 ### Store path (`КАТ26` → `КОНВЫВ`)
 
@@ -398,6 +485,118 @@ through zeros into the `z14` data and stops at 01507 (`06 002 3002`,
 the listed modules from 067 is missing. Nothing else in the translator
 reads 067: its only information words are 05747, 05750 and 05751. The
 Makefile drops `lib6`'s 0414 coverage, which is not code.
+
+### Linking loader: expected behaviour
+
+What the missing program in drum 21 zone 014 receives from the
+translator, and what it must do. [вывод] marks what follows from the
+formats above but has not been checked.
+
+**How it is reached.**
+
+1. Key `Р` with a `(` group, e.g. `РАК,ГЛАВ(ПЕРВ+ВТОР)!`: `(` makes
+   `ГЛАВ` the module name and sets `КОНЗАД` := 0; each `+` name (and the
+   one before `)`) goes to 010005 + `06470`, and `06470` counts them
+   (`lib6`: 010005 = `ПЕРВ`, 010006 = `ВТОР`, `06470` = 2) [трасса].
+2. At the closing `!` (f1a 05164–05167), if the list is not empty,
+   `06470` += 6 (`D01547`), so it becomes the length of the block from
+   010000 (010 in `lib6`). The block is handed to the resident exchange
+   routine (`ПВ 12(М1)`, word `06470 << 15 | D05051`) [трасса].
+3. At the end of translation `ВЫВМ` builds the module at 014000. With
+   `А`, `КОНВЫВ` stores it on 067 and jumps to `ЗАВЕР` + 011 (06517)
+   [трасса lib6]. Without `А`, `ВЫВМ` jumps to `ЗАВЕР` (06506), which
+   first puts a header at 013776 (module name 06501) and 013777
+   ((05737 << 12 | 05740) << 20) and writes out the last page, then
+   reaches 06517 too [код; the jump is traced in `rnoa`, which has no
+   `(`].
+4. 06517: `КОНЗАД` ≠ 0 — Э74. Otherwise М13 := `06470`, `Э70 D06764`
+   (`0014000000210014`: physical read of drum 021 zone 014 into page 0,
+   addresses 0–01777) and `ПБ 011`. In `lib6`, М13 = 010 at the jump,
+   and the accumulator still holds the information word [трасса].
+
+The older build (0400–0404) also reads drum 21 zone 014 to link, so
+that zone was the loader's fixed slot in both builds [код].
+
+**The program.** One zone (1024 words), at 0–01777, entry 011. It
+replaces the resident (zone 0406), so it must do its own exchanges
+[код]. It is entered by `ПБ`, as the alternative to Э74, so it is the
+last step of the job: it does what the parameter words say and ends
+the job itself. М1 is no return link: it is 06515 without `А` and 05722
+with `А` [трасса z14p, z14pn].
+
+**Inputs.**
+
+| Where | Contents | Status |
+|---|---|---|
+| М13 | 6 + the number of `+` names: length of the block from 010000 | [трасса] |
+| 010000 | name after `,` in the key | purpose unknown |
+| 010001, 010002 | address range as ITM text, defaults `+00010` and `+70000` (octal 010 and 070000); a number in the key replaces them | [трасса] for the defaults |
+| 010003 | name after `:` | purpose unknown |
+| 010004 | name after `-` | purpose unknown |
+| 010005 … 010000 + М13 − 1 | the `+` list: modules to link to the main one | [трасса] |
+| 06501 | name of the main module (the one before `(`) | [трасса] |
+| volume 067 | catalogue in zone 0, modules as described above | [опыт] |
+| 014000 | the main module as built by `ВЫВМ`; header at 013776–013777 only without `А` | in core [трасса z14p, z14pn] |
+
+**What is in core at 011** [трасса]. Jobs `z14p` (`lib6`) and `z14pn`
+(`lib6n`: the same key without `А`) run on a copy of 2148 whose zone
+0414 holds a probe (`tools/mkz14.py`, `VOL2148` in `tools/trace.sh`):
+`счи М13`, `счи М1`, reads of 010000–010007 and 013776–014001, Э74.
+
+- М13 = 010 in both.
+- 013776–014001: with `А` — 0, 0, `0000600000000000`, 0 (module word 0,
+  image 6; word 1 is 0 without `Г`); without `А` — `0000031362314223`
+  (`ГЛАВ`), `0000300000000000` ((6 << 12 | 0) << 20), then the same
+  module words. So the module at 014000 is still in core, and the
+  header is there only without `А`.
+- 010000–010007 do not hold the key block: they hold phase 2's name
+  table, pairs (name, kind << 30 | value): `НАЧ` 010, `ИС` 012, `А` 014,
+  `Б` 015, all kind 1. The block that phase 1 passed to the pager at
+  the `!` (step 2) went to virtual memory, so the loader must read it
+  back from the translator's pages; where that page lies on drum 20/23
+  was not determined.
+
+**Required functions** [вывод]:
+
+1. Read the 067 catalogue (zone 0) and find the main module (06501;
+   with `А` it has just been stored there) and every `+` name. Each
+   entry gives the start zone (bits 1–10) and the image length (bits
+   33–47). A missing name needs an error report of unknown form.
+2. Read each module's zones. Word 0 gives the image length, literal and
+   reference-record counts, word 1 the export-table length; the image
+   follows from word 2.
+3. Place the images one after another inside the range 010001–010002.
+   The first one at 010 needs no relocation, since every module is
+   translated for 010.
+4. Relocate: for every half-word whose 3-bit scale field is 1, add
+   (load address − 010) to its address field; 3 subtracts it. Kinds 2
+   and 4 add or subtract the address of the module's `Р` area (size in
+   descriptor bits 21–32), which the loader must allocate. Fields of 0
+   are absolute.
+5. Link: kind 5 replaces the literal number in the address field with
+   the address of the external name; kind 6 takes reference record n
+   (`literal << 30 | offset`) and puts the name's address + offset in
+   the field. Names are resolved against the other modules' export
+   tables (pairs name, kind << 45 | address, written with option `Г`).
+6. Patch `Л;` words: each reference record with a field descriptor
+   (`ЗПКОМ`) names a word, a field and the kind of the value already in
+   that field; the field must be relocated or linked like a half-word
+   [вывод].
+7. Start the program. The module records no start address, so the
+   entry must be a convention: the first image word, an exported name,
+   or one of the names after `,`, `:` or `-`.
+
+**Not specifiable yet.**
+
+- How the two kinds of reference record are told apart: a kind-6
+  record (`literal << 30 | offset`) has 0 in bits 46–48, while an `Л;`
+  record has its kind there. An `Л;` field of kind 0 makes no record,
+  so a 0 in bits 46–48 seems to mark the kind-6 form [вывод].
+- Where the `Р` area goes, and whether modules share it (a common
+  block) or each gets its own.
+- The meaning of the `,`, `:`, `-`, `/`, `.` items.
+- How the start address is chosen, and what the 013776 header is for.
+- Error reporting.
 
 ## Search of the volumes
 

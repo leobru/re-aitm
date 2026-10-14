@@ -62,16 +62,17 @@ def code(name):
     except OSError:
         return res
     for l in f:
-        m = re.match(r'^.{0,36}?([0-7]{5}) ([0-7]{2} [0-7]{2,3} +[0-7]{4,5}|[0-7]{16})(?: +[0-7]{5})? +\d{4}  \d{4} (.{0,6}) ?(\S*)', l)
+        m = re.match(r'^.{0,36}?([0-7]{5}) ([0-7]{2} [0-7]{2,3} +[0-7]{4,5}|[0-7]{16})(?: +[0-7]{5})? +\d{4}  \d{4} (.{0,6}) ?(\S*) *(\S*)', l)
         if not m:
             continue
         a = int(m.group(1), 8)
         allw[name].add(a)
         if m.group(3).strip():
             lab, base = m.group(3).strip(), a
-        # a word that starts with КОНК or ДК is data in command format;
-        # КК here is an extracode (КК '64',…)
-        if ' ' in m.group(2) and m.group(4) not in ('КОНК', 'ДК', 'ДКБ'):
+        # a word that starts with КОНК, ДК or КК 0,… (an Э64 parameter
+        # word) is data in command format; КК '64',… is an extracode
+        kk0 = m.group(4) == 'КК' and m.group(5).startswith('0,')
+        if ' ' in m.group(2) and m.group(4) not in ('КОНК', 'ДК', 'ДКБ') and not kk0:
             res[a] = (lab + ('+%o' % (a - base) if a != base else '')) if lab else ''
     return res
 

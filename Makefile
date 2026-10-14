@@ -6,7 +6,7 @@ PARTS := $(shell grep -v '^\#' parts.txt | awk '{print $$1}')
 ZONES := $(shell grep -v '^\#' parts.txt | awk '{for (i = 4; i <= NF; i++) { sub(/\..*/, "", $$i); print $$i }}' | sort -u)
 LIBJOBS := lib1 lib2 lib3 lib4 lib5 lib6
 SBJOBS := sb1 sb2 sb3 sb4 sb5
-JOBS  := aitm w1 w2 w3 w5 keys macro macro2 macro3 macro4 corr dbg dbge errs sect hex comm rerr bib tape $(LIBJOBS) $(SBJOBS)
+JOBS  := aitm w1 w2 w3 w5 keys macro macro2 macro3 macro4 corr corr1 corr2 corr3 corr4 corr5 corr6 corr7 corr8 dbg dbge dbgx errs sect hex lfld rnoa lname punch comm rerr bib tape flist fsb ext1 ext2 $(LIBJOBS) $(SBJOBS)
 
 all: check
 
@@ -51,6 +51,32 @@ traces/sb%.ev: VOLIN = $(patsubst %.ev,%.vol,$(filter traces/%,$^))
 traces/sb1.ev: traces/zero.vol
 traces/sb2.ev: traces/sb1.ev
 traces/sb3.ev traces/sb4.ev traces/sb5.ev: traces/sb2.ev
+
+# Ключ Ф: блок 1 в библиотеку на обнулённом томе как ЛЕНТ 31(-ЗП);
+# fsb берёт его оттуда же как ЛЕНТ 30 разделом Б;
+traces/flist.ev: jobs/flist.b6 traces/zero.vol
+	VOLIN=traces/zero.vol VOLOUT=traces/flist.vol tools/trace.sh $< traces/flist.txt | tools/phases.py - traces/flist.cov > $@
+traces/fsb.ev: jobs/fsb.b6 traces/flist.ev
+	VOLIN=traces/flist.vol tools/trace.sh $< traces/fsb.txt | tools/phases.py - traces/fsb.cov > $@
+
+# Раздел Э; под ключом Р: литералы и записи ссылок в модуле (traces/ext1.lib)
+traces/ext1.ev: jobs/ext1.b6
+	VOLOUT=traces/ext1.vol tools/trace.sh $< traces/ext1.txt | tools/phases.py - traces/ext1.cov > $@
+	tools/vol.py traces/ext1.vol > traces/ext1.lib
+
+# Зона 0414 (связывающий загрузчик) с пробой (tools/mkz14.py) на копии 2148:
+# lib6 (с А) и lib6n (без А) на томе lib5; проба читает входы загрузчика
+# и кончает Э74.  Не в JOBS: покрытие частей не учитывает пробу.
+traces/z14mock.2148: tools/mkz14.py
+	@mkdir -p traces
+	tools/mkz14.py $@
+traces/z14p.ev: jobs/lib6.b6 traces/lib5.ev traces/z14mock.2148
+traces/z14pn.ev: jobs/lib6n.b6 traces/lib5.ev traces/z14mock.2148
+traces/z14p.ev traces/z14pn.ev:
+	VOL2148=traces/z14mock.2148 VOLIN=traces/lib5.vol tools/trace.sh $< $(@:.ev=.txt) > $(@:.ev=.log)
+	tools/phases.py $(@:.ev=.log) > $@
+	tail -2000 $(@:.ev=.log) > $(@:.ev=.tr)
+	rm -f $(@:.ev=.log)
 
 # Части (parts.txt): образ, покрытие, сырой вывод disbesm6
 parts: zones traces

@@ -140,7 +140,6 @@ Dispak's `itm_to_gost` (`dispak/encoding.c`) disagrees with the OS table in thre
 | 054 | ⩾ | `>` |
 | 074 | ⩽ | `<` |
 | 060 | ∨ | `V` |
-| 072 | × | Cyrillic `Х` |
 | 0176 | ⏨ | `Е` |
 | 0137 | ′ | `’` |
 | 0150 | ― | `-` |
@@ -155,7 +154,9 @@ Dispak's `itm_to_gost` (`dispak/encoding.c`) disagrees with the OS table in thre
 
 **Not decoded:** 073, 0136, 0140, 0142 and 0173.
 
-Dispak's `gost_to_itm` also differs from the OS table at GOST 020, 024, 035, 036, 116, 117, 120, 124, 125, 131, 135–137 and 172–176.
+ITM 072 used to print as the Cyrillic `Х`, and GOST 024 (`×`) used to read as ITM 0227 (`Х`), so `×` could not be entered. Dispak now maps them to each other.
+
+Dispak's `gost_to_itm` also differs from the OS table at GOST 020, 035, 036, 116, 117, 120, 124, 125, 131, 135–137 and 172–176.
 
 ## Sources
 

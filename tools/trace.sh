@@ -5,13 +5,15 @@
 #            tools/phases.py - covdir
 # Runs in a temporary directory with a private copy of 2099 and a 2222
 # that is empty or a copy of $VOLIN; the resulting 2222 is saved to
-# $VOLOUT.  dispak is killed after 60 seconds.
+# $VOLOUT.  $VOL2148, if set, is used as volume 2148 (ЛЕНТ 40).
+# dispak is killed after 60 seconds.
 job=$(realpath "$1"); prn=${2:+$(realpath -m "$2")}
 path=${BESM6_PATH:-/usr/local/share/besm6}
 tmp=$(mktemp -d)
 if [ -n "$VOLIN" ]; then cp "$VOLIN" "$tmp/2222" && chmod u+w "$tmp/2222"
 else touch "$tmp/2222"; fi
 cp "$path/2099" "$tmp/2099" && chmod u+w "$tmp/2099"
+[ -n "$VOL2148" ] && cp "$VOL2148" "$tmp/2148"
 (cd "$tmp" && printf 't2\ng\nq\n' |
     sh -c 'echo $$ >pid; exec dispak "$@"' sh --path=.:$path -b "$job" 2>&1 >prn.txt |
     grep -E '^[0-7]{5}:') &
