@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+# Drop the empty "мода" fillers of a disbesm6 -s listing that BEMSH puts back
+# by itself (before ПВ and extracodes, which BEMSH always places in a right
+# half, and before labels). A filler that only pads to a word boundary in the
+# original is kept as one explicit "мода" so that the code reassembles to the
+# same addresses. A labelled filler before ПВ or an extracode gives its label
+# to that instruction (the label starts the word, BEMSH pads the left half).
+# "кк '66',адрес" becomes "э66 адрес": BEMSH always places Э66 in a left
+# half, so a filler in front of it is dropped as well.
+# Usage: tools/stripmoda.py in.be out.be
+import re, sys
+L = open(sys.argv[1]).read().split('\n')
+for i, l in enumerate(L):
+    # the text in the ITM code after a constant is a comment
+    L[i] = l = re.sub(r"^([^\t]*\t[^\t]+\t\S+) (ITM '.*)$", r'\1\t\2', l)
+    f = l.split('\t')
+    if len(f) > 2 and f[1] == 'кк' and f[2].startswith("'66',"):
+        f[1] = 'э66'; f[2] = f[2][5:]
+        L[i] = '\t'.join(f)
+out = []; kept = 0; i = 0
+while i < len(L):
+    f = L[i].rstrip('\t').split('\t')
+    if len(f) == 2 and f[0] and f[1] == 'мода':
+        g = L[i + 1].split('\t')
+        if g[0] == '' and len(g) > 1 and (g[1] == 'пв' or g[1].startswith('Э')):
+            L[i + 1] = f[0] + L[i + 1]
+            i += 1
+            continue
+    if L[i].rstrip('\t') == '\tмода':
+        j = i
+        while L[j].rstrip('\t') == '\tмода':
+            j += 1
+        f = L[j].split('\t')
+        op = f[1] if len(f) > 1 else ''
+        right_only = op == 'пв' or op.startswith('Э')
+        if f[0] == '' and j > i + 1:
+            # a run of fillers may hold a whole filler word: keep it as is
+            out.extend(['\tмода\t,ЗАПОЛНИТЕЛЬ, КАК В ОРИГИНАЛЕ'] * (j - i))
+            kept += j - i
+        elif f[0] == '' and op == 'э66':
+            pass
+        elif f[0] == '' and not right_only:
+            out.append('\tмода\t,ДО ГРАНИЦЫ СЛОВА, КАК В ОРИГИНАЛЕ')
+            kept += 1
+        i = j
+        continue
+    out.append(L[i]); i += 1
+open(sys.argv[2], 'w').write('\n'.join(out))
+print(kept, 'fillers kept', file=sys.stderr)

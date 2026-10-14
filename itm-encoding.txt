@@ -1,0 +1,116 @@
+# ITM (Автокод ИТМ) 8-bit character code.
+# Columns: ITM octal | glyph (from OS table ИТАБЛ, v6v7.be, GOST->ITM, inverted) | GOST code(s) | dispak itm_to_gost
+#          | group | 5-bit x = ITM & 037 | МТК-2 key: Latin / Russian / figures register
+# Groups: DIG = 000-017 binary digits; FIG = 040+x; FIG2 = 0100+x/0140+x; LAT = 0200+x; RUS = 0300+x.
+000  0 <0177>         000,177  dispak:000 0              DIG  x=00  
+001  1                001      dispak:001 1              DIG  x=01  
+002  2                002      dispak:002 2              DIG  x=02  
+003  3                003      dispak:003 3              DIG  x=03  
+004  4                004      dispak:004 4              DIG  x=04  
+005  5                005      dispak:005 5              DIG  x=05  
+006  6                006      dispak:006 6              DIG  x=06  
+007  7                007      dispak:007 7              DIG  x=07  
+010  8                010      dispak:010 8              DIG  x=10  
+011  9                011      dispak:011 9              DIG  x=11  
+017  <space>          017      dispak:017 <space>        DIG  x=17  
+040  <space2>         176      dispak:017 <space>        FIG  x=00  (RUS)     
+041  ’                033      dispak:033 ’              FIG  x=01  T     Т   5
+042  ◇                127      dispak:127 ◇              FIG  x=02  CR        
+043  _                132      dispak:132 _              FIG  x=03  O     О   9
+044  |                130      dispak:130 |              FIG  x=04  SP        
+045  ;                026      dispak:026 ;              FIG  x=05  H     Х   Щ
+046  ,                015      dispak:015 ,              FIG  x=06  N     Н   ,
+047  .                016      dispak:016 .              FIG  x=07  M     М   .
+050  ‾                115      dispak:115 ‾              FIG  x=10  LF        
+051  )                023      dispak:023 )              FIG  x=11  L     Л   )
+053  [                027      dispak:027 [              FIG  x=13  G     Г   Ш
+054  ⩾                117      dispak:036 >              FIG  x=14  I     И   8
+055  ⊃                122      dispak:136 °              FIG  x=15  P     П   0
+056  :                037      dispak:037 :              FIG  x=16  C     Ц   :
+057  =                025      dispak:025 =              FIG  x=17  V     Ж   =
+060  ∨                120      dispak:112 V              FIG  x=20  E     Е   3
+061  +                012      dispak:012 +              FIG  x=21  Z     З   +
+062  %                126      dispak:126 %              FIG  x=22  D     Д   КтоТам
+063  !                133      dispak:133 !              FIG  x=23  B     Б   ?
+064  ‘                032      dispak:032 ‘              FIG  x=24  S     С   '
+065  ÷                124      dispak:037 :              FIG  x=25  Y     Ы   6
+066  ]                030      dispak:030 ]              FIG  x=26  F     Ф   Э
+067  /                014      dispak:014 /              FIG  x=27  X     Ь   /
+070  -                013      dispak:013 -              FIG  x=30  A     А   -
+071  ∧                121      dispak:121 ∧              FIG  x=31  W     В   2
+072  ×                024      dispak:065 Х              FIG  x=32  J     Й   Ю/bell
+073  <carriage-return> 175      dispak:000 0              FIG  x=33  FIGS      
+074  ⩽                116      dispak:035 <              FIG  x=34  U     У   7
+075  ≡                125      dispak:032 ‘              FIG  x=35  Q     Я   1
+076  (                022      dispak:022 (              FIG  x=36  K     К   (
+134  "                134      dispak:134 "              FIG2 x=34  U     У   7
+135  Ъ                135      dispak:135 Ъ              FIG2 x=35  Q     Я   1
+136  °                136      dispak:000 0              FIG2 x=36  K     К   (
+137  ′                137      dispak:033 ’              FIG2 x=37  LTRS      
+140  <end-of-info>    172      dispak:000 0              FIG2 x=00  (RUS)     
+142  <set-position>   173      dispak:000 0              FIG2 x=02  CR        
+143  ↑                021      dispak:021 ↑              FIG2 x=03  O     О   9
+145  ¬                123      dispak:123 ¬              FIG2 x=05  H     Х   Щ
+146  <                035      dispak:035 <              FIG2 x=06  N     Н   ,
+147  >                036      dispak:036 >              FIG2 x=07  M     М   .
+150  ―                131      dispak:013 -              FIG2 x=10  LF        
+152  ≠                034      dispak:034 ≠              FIG2 x=12  R     Р   4/Ч
+170  *                031      dispak:031 *              FIG2 x=30  A     А   -
+173  <end-of-line>    174      dispak:000 0              FIG2 x=33  FIGS      
+176  ⏨                020      dispak:045 Е              FIG2 x=36  K     К   (
+201  Т                062      dispak:062 Т              LAT  x=01  T     Т   5
+203  О                056      dispak:056 О              LAT  x=03  O     О   9
+205  Н                055      dispak:055 Н              LAT  x=05  H     Х   Щ
+206  N                105      dispak:105 N              LAT  x=06  N     Н   ,
+207  М                054      dispak:054 М              LAT  x=07  M     М   .
+211  L                104      dispak:104 L              LAT  x=11  L     Л   )
+212  R                107      dispak:107 R              LAT  x=12  R     Р   4/Ч
+213  G                101      dispak:101 G              LAT  x=13  G     Г   Ш
+214  I                102      dispak:102 I              LAT  x=14  I     И   8
+215  Р                060      dispak:060 Р              LAT  x=15  P     П   0
+216  С                061      dispak:061 С              LAT  x=16  C     Ц   :
+217  V                112      dispak:112 V              LAT  x=17  V     Ж   =
+220  Е                045      dispak:045 Е              LAT  x=20  E     Е   3
+221  Z                114      dispak:114 Z              LAT  x=21  Z     З   +
+222  D                077      dispak:077 D              LAT  x=22  D     Д   КтоТам
+223  В                042      dispak:042 В              LAT  x=23  B     Б   ?
+224  S                110      dispak:110 S              LAT  x=24  S     С   '
+225  У                063      dispak:063 У              LAT  x=25  Y     Ы   6
+226  F                100      dispak:100 F              LAT  x=26  F     Ф   Э
+227  Х                065      dispak:065 Х              LAT  x=27  X     Ь   /
+230  А                040      dispak:040 А              LAT  x=30  A     А   -
+231  W                113      dispak:113 W              LAT  x=31  W     В   2
+232  J                103      dispak:103 J              LAT  x=32  J     Й   Ю/bell
+234  U                111      dispak:111 U              LAT  x=34  U     У   7
+235  Q                106      dispak:106 Q              LAT  x=35  Q     Я   1
+236  К                052      dispak:052 К              LAT  x=36  K     К   (
+301  Щ                071      dispak:071 Щ              RUS  x=01  T     Т   5
+311  Л                053      dispak:053 Л              RUS  x=11  L     Л   )
+313  Г                043      dispak:043 Г              RUS  x=13  G     Г   Ш
+314  И                050      dispak:050 И              RUS  x=14  I     И   8
+315  П                057      dispak:057 П              RUS  x=15  P     П   0
+316  Ц                066      dispak:066 Ц              RUS  x=16  C     Ц   :
+317  Ж                046      dispak:046 Ж              RUS  x=17  V     Ж   =
+320  Э                074      dispak:074 Э              RUS  x=20  E     Е   3
+321  З                047      dispak:047 З              RUS  x=21  Z     З   +
+322  Д                044      dispak:044 Д              RUS  x=22  D     Д   КтоТам
+323  Б                041      dispak:041 Б              RUS  x=23  B     Б   ?
+324  Ш                070      dispak:070 Ш              RUS  x=24  S     С   '
+325  Ы                072      dispak:072 Ы              RUS  x=25  Y     Ы   6
+326  Ф                064      dispak:064 Ф              RUS  x=26  F     Ф   Э
+327  Ь                073      dispak:073 Ь              RUS  x=27  X     Ь   /
+331  Ч                067      dispak:067 Ч              RUS  x=31  W     В   2
+332  Й                051      dispak:051 Й              RUS  x=32  J     Й   Ю/bell
+334  Ю                075      dispak:075 Ю              RUS  x=34  U     У   7
+335  Я                076      dispak:076 Я              RUS  x=35  Q     Я   1
+
+# Two-character input sequences glued into one ITM code by В6В7 (labels ПРИ4И/ПРИ4К):
+#   ":×" -> 140 end of information    "::" -> 142 set position
+#   ":>" -> 173 end of line/repeat    ":<" -> 073 carriage return
+#   ':' followed by anything else is output as 056 and the next character is processed normally.
+# GOST 172..177 (end-of-info, set-position, EOLN, CR, space2, 177) map through ИТАБ = 2007336661140.
+#
+# dispak itm_to_gost disagrees with the OS table at:
+#   054 (dispak >, OS ⩾)   055 (°, ⊃)   060 (V, ∨)   065 (:, ÷)   072 (Х, ×)   074 (<, ⩽)
+#   075 (‘, ≡)   137 (’, ′)   150 (-, ―)   176 (Е, ⏨);   073 136 140 142 173 are not decoded.
+#   dispak gost_to_itm also differs at GOST 020 024 035 036 116 117 120 124 125 131 135-137 172-176.

@@ -1,0 +1,20 @@
+# Generated
+2222
+zones/
+traces/
+parts/*.bin
+parts/*.cov
+parts/*.dis
+parts/*.new
+parts/*.b6
+parts/*.lst
+parts/*.sym
+parts/*.adr
+parts/*.obj
+notes/__pycache__/
+tools/__pycache__/
+# Local copy of the 1969 manual (besm6.github.io/doc)
+*.ps
+macros.lib
+macros.asm.b6
+macros.be.lst
