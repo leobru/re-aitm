@@ -9,6 +9,8 @@ import glob, os, sys
 
 
 def sectors(spec):
+    if spec.startswith('-'):            # a gap (parts.txt): no zone
+        return []
     z, _, s = spec.partition('.')
     return [(z, int(s))] if s else [(z, i) for i in range(4)]
 

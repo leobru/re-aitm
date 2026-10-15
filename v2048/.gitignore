@@ -1,0 +1,11 @@
+# Generated (as in the top-level .gitignore)
+parts/*.bin
+parts/*.cov
+parts/*.dis
+parts/*.new
+parts/*.b6
+parts/*.lst
+parts/*.sym
+parts/*.adr
+parts/*.obj
+notes/__pycache__/

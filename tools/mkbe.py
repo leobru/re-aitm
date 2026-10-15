@@ -34,7 +34,9 @@
 #   TOP    = '''* ...'''                block comment after the СТАРТ lines;
 #   BLOCK  = {'77316': '''* ...'''}     block comments before an address;
 #   INLINE = {'77316': '...'}           end-of-line comments (after a comma
-#            when the operand is empty).
+#            when the operand is empty);
+#   KEEPEXEC = True                     a zero word that was executed
+#            (parts/NAME.cov) stays ЗП/ЗП instead of ПАМ.
 import importlib.util, os, re, subprocess, sys
 
 
@@ -275,19 +277,25 @@ def chunks(names, n=5):      # a card holds 5 names of 6 letters
 
 
 def run(*cmd):
+    # tools/X - a tool next to this script (the parts may be in another
+    # directory, e.g. v2048/)
+    if cmd[0].startswith('tools/'):
+        cmd = (os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            cmd[0][6:]),) + cmd[1:]
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                           text=True).stdout
 
 
-def zerowords(L, amap):
+def zerowords(L, amap, executed=frozenset()):
     """A zero word that disbesm6 shows as ЗП / ЗП (both halves without an
     operand) becomes ПАМ 1; a run of such words with no label inside it
-    becomes one ПАМ N."""
+    becomes one ПАМ N. A word that was executed (EXECUTED, 'ааааа') stays
+    code."""
     def zero(i):                    # i - source line number
         return i <= len(L) and re.fullmatch(r'\S*\tзп\t?', L[i - 1]) is not None
 
     def word(i, a):                 # lines i, i + 1 are the word a
-        return amap.get(i) == a and zero(i) and zero(i + 1) and \
+        return a not in executed and amap.get(i) == a and zero(i) and zero(i + 1) and \
             not L[i].split('\t')[0] and amap.get(i + 1) == a + 'п'
     out = []; i = 1
     while i <= len(L):
@@ -336,7 +344,12 @@ def make(name):
         sys.exit('%s: plain source was not translated' % name)
     amap = addrmap(plain + '.lst')
     L = open(plain, encoding='utf-8').read().split('\n')
-    L2 = zerowords(L, amap)
+    cov = 'parts/%s.cov' % name
+    # KEEPEXEC = True in the notes: executed zero words stay code (needs
+    # coverage without the start-up loader in the low cells, AITM_FINAL)
+    executed = {x.split(':')[0] for x in open(cov)} \
+        if notes.get('KEEPEXEC') and os.path.exists(cov) else set()
+    L2 = zerowords(L, amap, executed)
     if L2 != L:
         L = L2
         open(plain, 'w', encoding='utf-8').write('\n'.join(L))

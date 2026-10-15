@@ -7,10 +7,14 @@
 # register of the ПВ, the callers (part:address) and the exits - the last
 # instruction before control came back to the word after the call (or
 # "+n" - the return went n words further).
-import re, sys
+import os, re, sys
 from collections import defaultdict
 
-DRUM, OFFSET = 0o21, 0o400
+# the source of the code, as in tools/phases.py (AITM_UNIT, AITM_OFFSET,
+# AITM_PHYS; v2048/Makefile sets them for the build on 2048)
+DRUM = int(os.environ.get('AITM_UNIT', '21'), 8)
+OFFSET = int(os.environ.get('AITM_OFFSET', '400'), 8)
+NEEDPHYS = os.environ.get('AITM_PHYS', '1') != '0'
 part_of = {}                            # (zone, sector) -> (name, base addr)
 for l in open('parts.txt'):
     if l.startswith('#') or not l.strip():
@@ -69,8 +73,9 @@ for fn in sys.argv[1:]:
                 unit, raddr = (rw >> 12) & 0o177, rw & 0o7777
                 if lop & 0o10:
                     page = (laddr & 0o3700) << 4
-                    zone = raddr & 0o37
-                    ours = unit == DRUM and lop & 4
+                    # drums: 5-bit zone; tapes (ЛЕНТ 30-67): 12-bit, as in phases.py
+                    zone = raddr & 0o37 if unit < 0o30 or unit >= 0o70 else raddr & 0o7777
+                    ours = unit == DRUM and (lop & 4 or not NEEDPHYS)
                     if lreg & 8:
                         s = (raddr >> 6) & 3
                         dst = page + (laddr & 3) * 256

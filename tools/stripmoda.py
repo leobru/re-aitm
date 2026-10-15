@@ -13,6 +13,11 @@ L = open(sys.argv[1]).read().split('\n')
 for i, l in enumerate(L):
     # the text in the ITM code after a constant is a comment
     L[i] = l = re.sub(r"^([^\t]*\t[^\t]+\t\S+) (ITM '.*)$", r'\1\t\2', l)
+    # a guessed text (возм.) with unbalanced brackets is dropped: БЕМШ
+    # counts brackets in the comment too (НЕСООТВ СКБК)
+    m = re.search(r"\tITM '(.*)' возм\.$", l)
+    if m and m.group(1).count('(') != m.group(1).count(')'):
+        L[i] = l = l[:m.start()]
     f = l.split('\t')
     if len(f) > 2 and f[1] == 'кк' and f[2].startswith("'66',"):
         f[1] = 'э66'; f[2] = f[2][5:]

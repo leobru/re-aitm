@@ -20,6 +20,10 @@
 #    the part out of them to parts/NAME.new and compares it with
 #    parts/NAME.bin (word 0 of an image at 0 is taken from the original:
 #    the zone holds a marker there, memory cell 0 is always zero).
+# With a single part in parts.txt there are no links to resolve: the
+# translation job itself loads the module at its address (НАЗ, ЗОНГП into
+# zone 0400 of 2222, as re-dispak/zongp.pl does) and step 2 is skipped.
+# A spec -NNNN in parts.txt is a gap of NNNN (octal) words (ПАМ, zeros).
 # Every dispak run is killed after 60 seconds.
 use utf8;
 use feature 'unicode_strings';
@@ -43,7 +47,7 @@ while (<P>) {
     # zones ZZZZ or sectors ZZZZ.S of 256 words; the image of ЗОНГП starts
     # at the page boundary
     my $len = 0;
-    $len += /\./ ? 0400 : 02000 for @z;
+    $len += /^-([0-7]+)$/ ? oct($1) : /\./ ? 0400 : 02000 for @z;
     $pnaz{$n} = $a; $pidx{$n} = $i++; $pmod{$n} = $m; $plen{$n} = $len;
     $pnz{$n} = int(((oct($a) & 01777) + $len + 01777) / 02000);
 }
@@ -116,14 +120,24 @@ if (!-e 'macros.lib' || -M 'macros.lib' > -M 'macros.be') {
 }
 system("besmtool write 2222 --start=040 --from-file=macros.lib > /dev/null");
 
+# one part: the translation loads the image itself (ГП at НАЗ by ЗОНГП)
+$single = @parts == 1 && !$tonly;
+sub gpcards {
+    my ($p) = @_;
+    system("besmtool zero 2222 --start=" . imgzone($p) .
+           " --length=$pnz{$p} > /dev/null");
+    return sprintf("ЧТКОМП430040^\n0-0^\nНАЗ   %06o^\nЗОНГП 43%s  000000^\n",
+                   oct($pnaz{$p}) || 1, imgzone($p));
+}
 for $src (@ARGV) {
     my ($p) = $src =~ m|([^/.]+)[^/]*\.be$|;
     die "$src: $p not in parts.txt\n" unless defined $pidx{$p};
     die "$src: a variant can only be translated (-t)\n"
         unless $tonly || $src eq "parts/$p.be";
-    translate($src, $p);
+    translate($src, $p, $single ? gpcards($p) : undef);
 }
 exit 0 if $tonly;
+goto COMPARE if $single;
 
 # Link job: the loader stub from re-dispak/rvs.pl, all parts at once
 for $p (@parts) {
@@ -161,6 +175,7 @@ $log = `timeout -s KILL 60 dispak -s parts/link.rvs.b6`;
 print $log if $verbose;
 print grep(/ОШИБ|НЕТ |КОНФУС/, split /^/, $log);
 
+COMPARE:
 $bad = 0;
 for $p (@parts) {
     my ($orig, $new) = ("parts/$p.bin", "parts/$p.new");
