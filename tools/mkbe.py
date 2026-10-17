@@ -876,6 +876,14 @@ def make(name):
                     l += '\t' + notes['INLINE']['%05o' % x]
                 out.append(l)
             continue
+        # a zero right half after a jump or a call in the left half is
+        # never executed: written the same way everywhere, ДК 0,0
+        # (disbesm6 gives КОНК В'00000000', ДК 0,0 after ПВЛ or ЗП)
+        f = l.split('\t')
+        if a is not None and a.endswith('п') and len(f) >= 3 and f[0] == '' \
+                and (f[1], f[2].strip()) in (('конк', "в'00000000'"), ('дк', '0,0'), ('зп', '')) \
+                and len(L[i - 2].split('\t')) > 1 and L[i - 2].split('\t')[1] in ('пб', 'пв', 'пвл'):
+            l = '\tдк\t0,0' + ('\t' + '\t'.join(f[3:]) if len(f) > 3 else '')
         out.append(l)
     # externals and entries go after the СТАРТ/М header
     head = []
