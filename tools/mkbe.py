@@ -141,6 +141,34 @@ def counter(L, i, r):
     return False
 
 
+def itmglyphs():
+    # ITM code -> character (itm-encoding.txt at the top of the repository)
+    res = {}
+    for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
+                               'itm-encoding.txt'), encoding='utf-8'):
+        m = re.match(r'([0-7]{3})\s+(\S)', l)
+        if m:
+            res.setdefault(int(m.group(1), 8), m.group(2))
+    return res
+
+
+def halfitm(h, glyph):
+    # a half-word of a mnemonic table: the code byte (a command of the first
+    # structure as it is, of the second one shifted left by 3) and two ITM
+    # characters; КОНК М16В'код'Х'литеры' and a comment
+    c, b1, b2 = h >> 16, (h >> 8) & 0o377, h & 0o377
+    name = glyph.get(b1, '?') + glyph.get(b2, '?')
+    if h == 0:
+        what = 'ПУСТО'
+    elif c >= 0o200:
+        what = '%s - %02o, 2-Я СТРУКТУРА' % (name, c >> 3)
+    elif c >= 0o50:
+        what = '%s - Э%02o' % (name, c)
+    else:
+        what = '%s - %03o' % (name, c)
+    return "конк\tм16в'%o'х'%04X'\t%s" % (c, h & 0xffff, what)
+
+
 def t8const(w, adj=False, single=False):
     """A word as a text constant in the БЕМШ code: Т'...' (right-justified)
     or МnТ'...' (shifted left by n bits), None if it is not text: two or
@@ -702,6 +730,7 @@ def make(name):
     # CHARS = ['ааааа-ббббб', 'ааааа', ...]: tables of single characters
     chars = [tuple((x.split('-') * 2)[:2]) for x in notes.get('CHARS', [])]
     using = None                    # (register, base) of the УПОТР in effect
+    glyph = None                    # ITM characters, for HALFITM
     out = []
     for i, l in enumerate(L, 1):
         a = amap.get(i)
@@ -760,6 +789,20 @@ def make(name):
                     errskip.add(n2)
                 continue
         f = l.split('\t')
+        # HALFITM = ['ааааа-ббббб']: tables of half-words "code, two ITM
+        # characters" (a mnemonic table), one КОНК per half-word
+        # (an empty slot, ПАМ, too)
+        if first and len(f) >= 3 and (f[1] == 'конд' or f[1] == 'пам' and f[2].isdigit()) \
+                and re.fullmatch(r'[0-7]{5}', a) and \
+                any(int(x.split('-')[0], 8) <= int(a, 8) <= int(x.split('-')[-1], 8)
+                    for x in notes.get('HALFITM', [])):
+            glyph = glyph or itmglyphs()
+            hs = []
+            for x in range(int(a, 8), int(a, 8) + (int(f[2]) if f[1] == 'пам' else 1)):
+                k = (x - plo) * 6
+                w = int.from_bytes(image[k:k + 6], 'big')
+                hs += [halfitm(w >> 24, glyph), halfitm(w & 0xffffff, glyph)]
+            l = f[0] + '\t' + '\n\t'.join(hs)
         if first and len(f) >= 3 and f[1] == 'конд' and not f[2].startswith('A(') \
                 and re.fullmatch(r'[0-7]{5}', a) and plo <= int(a, 8) < phi:
             k = (int(a, 8) - plo) * 6
@@ -876,13 +919,16 @@ def make(name):
                     l += '\t' + notes['INLINE']['%05o' % x]
                 out.append(l)
             continue
-        # a zero right half after a jump or a call in the left half is
-        # never executed: written the same way everywhere, ДК 0,0
-        # (disbesm6 gives КОНК В'00000000', ДК 0,0 after ПВЛ or ЗП)
+        # a zero right half after a jump, a call or an extracode in the left
+        # half is never executed (an extracode returns to the next word):
+        # written the same way everywhere, ДК 0,0 (disbesm6 gives
+        # КОНК В'00000000', ДК 0,0 after ПВЛ or ЗП)
         f = l.split('\t')
+        pf = L[i - 2].split('\t') if i >= 2 else []
         if a is not None and a.endswith('п') and len(f) >= 3 and f[0] == '' \
                 and (f[1], f[2].strip()) in (('конк', "в'00000000'"), ('дк', '0,0'), ('зп', '')) \
-                and len(L[i - 2].split('\t')) > 1 and L[i - 2].split('\t')[1] in ('пб', 'пв', 'пвл'):
+                and len(pf) > 2 and (pf[1] in ('пб', 'пв', 'пвл') or pf[1].startswith('Э')
+                                     or pf[1] == 'кк' and re.match(r"'[0-7]+',", pf[2])):
             l = '\tдк\t0,0' + ('\t' + '\t'.join(f[3:]) if len(f) > 3 else '')
         out.append(l)
     # externals and entries go after the СТАРТ/М header
@@ -933,9 +979,55 @@ def make(name):
         else:
             rep.append(l)
     out = rep
+    # EQUBUF = ('БУФЕР', 'ааааа', 'ббббб'): a buffer outside the image.
+    # Every command operand whose address falls there (a literal 'ааааа'
+    # or МЕТКА+N past the end of the part) gets a name - from NAMES or
+    # Dааааа - declared before ФИНИШ as ИМЯ ЭКВ БУФЕР+n; the buffer itself
+    # is БУФЕР ЭКВ 'ааааа'
+    if 'EQUBUF' in notes:
+        bname, blo, bhi = notes['EQUBUF']
+        blo, bhi = int(blo, 8), int(bhi, 8)
+        val = {}
+        for a, n in list(lab.items()) + list(names.items()):
+            if re.fullmatch(r'[0-7]{5}', a):
+                val[n] = int(a, 8)
+        val.setdefault(mods[name], plo or 1)
+        bufnames = {}
+
+        def bufname(t):
+            if t == blo:
+                return bname
+            n = names.get('%05o' % t, 'D%05o' % t)
+            bufnames[n] = t
+            return n
+
+        def operand(op):
+            m = re.fullmatch(r"(?:'([0-7]+)'|([А-ЯA-Z][А-ЯA-Z0-9]*)([+-]\d+)?)(\(М\d+\))?", op)
+            if not m:
+                return op
+            t = int(m.group(1), 8) if m.group(1) else \
+                val.get(m.group(2), -1) + int(m.group(3) or 0) if m.group(2) in val else -1
+            return bufname(t) + (m.group(4) or '') if blo <= t <= bhi else op
+        for k, l in enumerate(out):
+            f = l.split('\t')
+            if len(f) < 3 or f[1] in NOTCMD or f[1] in ('счрж', 'ржа'):
+                continue
+            if f[1] in ('кк', 'ккб', 'дк', 'дкб'):
+                c, _, op = f[2].partition(',')
+                f[2] = c + ',' + operand(op) if op else f[2]
+            else:
+                f[2] = operand(f[2])
+            out[k] = '\t'.join(f)
+        fin = next(k for k, l in enumerate(out) if l.startswith('\tФИНИШ'))
+        blk = notes.get('BLOCK', {}).get('%05o' % blo)
+        out[fin:fin] = (blk.strip('\n').split('\n') if blk else []) + \
+            ["%s\tэкв\t'%o'" % (bname, blo)] + \
+            ['%s\tэкв\t%s+%d' % (n, bname, t - blo) for n, t in sorted(bufnames.items(), key=lambda x: x[1])]
     text = '\n'.join(out)
     open('parts/%s.be' % name, 'w', encoding='utf-8').write(text)
     insplit = {'%05o' % x for v in split.values() for x, n in v}
+    if 'EQUBUF' in notes:
+        insplit.add(notes['EQUBUF'][1])
     for k in list(notes.get('BLOCK', {})) + list(notes.get('INLINE', {})) + list(newlab):
         if k not in byaddr and k not in insplit:
             print('%s: no source line at %s' % (name, k), file=sys.stderr)
