@@ -598,6 +598,20 @@ def make(name):
         kword[i] = ('%05o' % t, i < len(L) and (bool(L[i].split('\t')[0]) or na in names))
         if kword[i][0] not in names and kword[i][0] not in labs0:
             names[kword[i][0]] = 'D' + kword[i][0]
+    # ERRWORDS = ['ааааа-ббббб', 'ааааа', ...]: error words - the code in the
+    # left half, bit 16 and the continuation address in the right one;
+    # written as КОНК В'код' and КК '10',МЕТКА (with bit 16) or КК 0,МЕТКА -
+    # the address relocatable
+    errw = {}                       # address -> (left half, bit 16, target)
+    for x in notes.get('ERRWORDS', []):
+        lo_, hi_ = (int(y, 8) for y in (x.split('-') * 2)[:2])
+        for e in range(lo_, hi_ + 1):
+            k = (e - plo) * 6
+            w = int.from_bytes(img[k:k + 6], 'big')
+            t = '%05o' % (w & 0o77777)
+            errw['%05o' % e] = (w >> 24, (w & 0o77777777) >> 15, t)
+            if t not in names and t not in labs0:
+                names[t] = 'G' + t
     # explicit fillers kept by stripmoda: BEMSH pads a word itself before a
     # labelled line and before ПВ/extracodes, so the line after a filler in
     # a right half gets a label (its address has a name then) and that
@@ -731,6 +745,7 @@ def make(name):
     chars = [tuple((x.split('-') * 2)[:2]) for x in notes.get('CHARS', [])]
     using = None                    # (register, base) of the УПОТР in effect
     glyph = None                    # ITM characters, for HALFITM
+    errdrop = set()                 # right halves of ERRWORDS already written
     out = []
     for i, l in enumerate(L, 1):
         a = amap.get(i)
@@ -789,6 +804,18 @@ def make(name):
                     errskip.add(n2)
                 continue
         f = l.split('\t')
+        if first and a in errw and len(f) >= 3 and f[1] in ('конд', 'конк'):
+            left, flags, t = errw[a]
+            # A(...) has 15 bits only, so the half is КК: code 010 (that is
+            # bit 16) or 0, the address relocatable
+            right = "кк\t'%o',%s" % (flags << 3, final(t)) if flags else 'кк\t0,%s' % final(t)
+            if flags and notes.get('ERRFLAG'):
+                right += '\t' + notes['ERRFLAG']
+            l = "%s\tконк\tв'%o'\tОШИБКА %02o\n\t%s" % (f[0], left, left, right)
+            if f[1] == 'конк':          # the right half has a line of its own
+                errdrop.add(i + 1)
+        if i in errdrop:
+            continue
         # HALFITM = ['ааааа-ббббб']: tables of half-words "code, two ITM
         # characters" (a mnemonic table), one КОНК per half-word
         # (an empty slot, ПАМ, too)
