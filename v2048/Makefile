@@ -16,7 +16,8 @@ PARTS := $(shell grep -v '^\#' parts.txt | awk '{print $$1}')
 ZONES := $(shell grep -v '^\#' parts.txt | awk '{for (i = 4; i <= NF; i++) if ($$i !~ /^-/) { sub(/\..*/, "", $$i); print $$i }}' | sort -u)
 LIBJOBS := lib1 lib2 lib3 lib4 lib5 lib6
 SBJOBS := sb1 sb2 sb3 sb4 sb5
-OWNJOBS := macro2n lpun5 ltape errs2 txtcore
+OWNJOBS := macro2n lpun5 ltape errs2 txtcore errs3 errs4 glob dbg2 dbg3 dbg4 \
+	corr9 corr10 corr11 corr12 corr13 lfld2 dbg5 end55 dock
 JOBS  := aitm $(OWNJOBS) w1 w2 w3 w5 keys corr1 corr2 corr3 corr4 corr5 corr6 corr7 corr8 dbg dbge dbgx errs sect hex lfld rnoa lname punch comm bib tape flist fsb ext1 ext2 $(LIBJOBS) $(SBJOBS)
 
 all: check
@@ -24,7 +25,15 @@ all: check
 # Задания 2148 -> 2048; OWNJOBS - свои (macro2n: macro2 без ключей С и М;
 # lpun5: перфорация текста Л05, с печатью; ltape: Л10, -
 # текст на ленту 30; errs2: ошибки 32 и 37 по Приложению 4 руководства;
-# txtcore: вход в 010 с A = 06776 + N, текст в памяти с 07000)
+# txtcore: вход в 010 с A = 06776 + N, текст в памяти с 07000).
+# Задания покрытия - колоды из jobs/ИМЯ.itm (./covtry.sh jobs/ИМЯ.itm делает
+# колоду и показывает прирост): errs3, errs4 - ошибки 04 10 13 14 17 21 30 31
+# 35, 27 и операнды; glob - генеральные имена, комментарий, Т;, Л;; dbg2 -
+# прокрутка, интервалы со смещением; dbg3, dbg4 - ошибки 72, 74 заголовка
+# прокрутки; corr9-corr13 - ошибки 45, 44, 51, 46, 42 заголовка исправления;
+# lfld2 - поля Л; со ссылками вперед; dbg5 - ошибка 71 (Э070 на барабан при
+# прокрутке); end55 - знак после последнего Е; (ошибка 55); dock - aitm с
+# М4 = 010001 при входе (разряд 13 - стыковка, 05550-05574)
 jobs: $(addprefix jobs/,$(addsuffix .b6,$(filter-out $(OWNJOBS),$(JOBS))))
 jobs/%.b6: ../jobs/%.b6 $(T)/to2048.py
 	$(T)/to2048.py $< > $@
