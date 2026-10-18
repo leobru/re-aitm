@@ -6,7 +6,7 @@ PARTS := $(shell grep -v '^\#' parts.txt | awk '{print $$1}')
 ZONES := $(shell grep -v '^\#' parts.txt | awk '{for (i = 4; i <= NF; i++) { sub(/\..*/, "", $$i); print $$i }}' | sort -u)
 LIBJOBS := lib1 lib2 lib3 lib4 lib5 lib6
 SBJOBS := sb1 sb2 sb3 sb4 sb5
-JOBS  := aitm w1 w2 w3 w5 keys macro macro2 macro3 macro4 corr corr1 corr2 corr3 corr4 corr5 corr6 corr7 corr8 dbg dbge dbgx errs sect hex lfld rnoa lname punch comm rerr bib tape flist fsb ext1 ext2 $(LIBJOBS) $(SBJOBS)
+JOBS  := aitm w1 w2 w3 w5 keys macro macro2 macro3 macro4 corr corr1 corr2 corr3 corr4 corr5 corr6 corr7 corr8 dbg dbge dbgx errs sect hex lfld rnoa lname punch comm rerr bib tape flist fsb ext1 ext2 ext3 ext4 $(LIBJOBS) $(SBJOBS)
 
 all: check
 
@@ -59,10 +59,38 @@ traces/flist.ev: jobs/flist.b6 traces/zero.vol
 traces/fsb.ev: jobs/fsb.b6 traces/flist.ev
 	VOLIN=traces/flist.vol tools/trace.sh $< traces/fsb.txt | tools/phases.py - traces/fsb.cov > $@
 
-# Раздел Э; под ключом Р: литералы и записи ссылок в модуле (traces/ext1.lib)
-traces/ext1.ev: jobs/ext1.b6
-	VOLOUT=traces/ext1.vol tools/trace.sh $< traces/ext1.txt | tools/phases.py - traces/ext1.cov > $@
-	tools/vol.py traces/ext1.vol > traces/ext1.lib
+# Раздел Э; под ключом Р: литералы и записи ссылок в модуле (traces/ext1.lib);
+# ext3 - внешние имена, ext4 - таблица входов и описатели полей Л; (AITM-object.md)
+traces/ext1.ev traces/ext3.ev traces/ext4.ev: traces/%.ev: jobs/%.b6
+	VOLOUT=traces/$*.vol tools/trace.sh $< traces/$*.txt | tools/phases.py - traces/$*.cov > $@
+	tools/vol.py traces/$*.vol > traces/$*.lib
+
+# Загрузчик (tools/itmload.py вместо утраченной зоны 0414): link1 кладёт
+# в библиотеку подпрограмму ПЕЧ, link2 - главную программу ГЛАВ с внешними
+# именами ПЕЧ и ДВА; связанная программа печатает ПРИВЕТ ВСЕМУ и дважды
+# ПОКАЖИ ЛЮДЯМ (traces/link.txt), карта памяти - traces/link.map.
+# Оверлеи: link3 кладёт ПЕЧБ с теми же входами ПЕЧ, ДВА и другими
+# текстами; ГЛАВ(Л.ПЕЧ/Л.ПЕЧБ) - два сегмента с листа 02000, задание с
+# сегментом 1 печатает тексты ПЕЧ (traces/ovl1.txt), с сегментом 2 - ПЕЧБ
+link: traces/link.txt traces/ovl1.txt traces/ovl2.txt
+traces/link3.ev: jobs/link3.b6 traces/link2.ev
+	VOLIN=traces/link2.vol VOLOUT=traces/link3.vol tools/trace.sh $< traces/link3.txt | tools/phases.py - traces/link3.cov > $@
+traces/ovl%.txt: traces/link3.ev tools/itmload.py tools/vol.py
+	tools/itmload.py 'РАК,ГЛАВ(Л.ПЕЧ/Л.ПЕЧБ)!' traces/link3.vol --seg $* -o traces/ovl$*.b6 > traces/ovl$*.map
+	cd traces && timeout -s KILL 60 dispak ovl$*.b6 > ovl$*.txt
+	grep -q '$(TEXT)' $@
+traces/ovl1.txt: TEXT = ПОКАЖИ ЛЮДЯМ
+traces/ovl2.txt: TEXT = ПРОЩАЙТЕ ВСЕ
+traces/link1.ev: jobs/link1.b6
+	@mkdir -p traces
+	VOLOUT=traces/link1.vol tools/trace.sh $< traces/link1.txt | tools/phases.py - traces/link1.cov > $@
+traces/link2.ev: jobs/link2.b6 traces/link1.ev
+	VOLIN=traces/link1.vol VOLOUT=traces/link2.vol tools/trace.sh $< traces/link2.txt | tools/phases.py - traces/link2.cov > $@
+	tools/vol.py traces/link2.vol > traces/link2.lib
+traces/link.txt: traces/link2.ev tools/itmload.py tools/vol.py
+	tools/itmload.py 'РАК,ГЛАВ(ПЕЧ)!' traces/link2.vol -o traces/link.b6 > traces/link.map
+	cd traces && timeout -s KILL 60 dispak link.b6 > link.txt
+	grep -q 'ПОКАЖИ ЛЮДЯМ' $@
 
 # Зона 0414 (связывающий загрузчик) с пробой (tools/mkz14.py) на копии 2148:
 # lib6 (с А) и lib6n (без А) на томе lib5; проба читает входы загрузчика
@@ -93,4 +121,4 @@ check:
 clean:
 	rm -f 2222 parts/*.new parts/*.b6 parts/*.lst
 
-.PHONY: all zones traces parts be check clean
+.PHONY: all zones traces parts be check clean link

@@ -40,25 +40,38 @@ def zones(f):
             for z in range(ZONE_OFFSET, len(b) // ZONE)]
 
 
-def module(zs, z0):
+def parse(zs, z0):
+    """Module from zone z0: dict with header fields and its parts."""
     w = [x for z in zs[z0:] for x in z]
     n, nlit, nref = w[0] >> 33, (w[0] >> 22) & 0o3777, (w[0] >> 10) & 0o7777
     nexp = w[1] >> 36
-    print('  header %016o %016o: image %o, literals %o, references %o, exports %o'
-          % (w[0], w[1], n, nlit, nref, nexp))
-    img, p = w[2:2 + n], 2 + n
+    m = {'w0': w[0], 'w1': w[1], 'image': w[2:2 + n]}
+    p = 2 + n
     ns = (n + 7) // 8
-    scale, p = w[p:p + ns], p + ns
-    for i, x in enumerate(img):
-        f = [(scale[i // 8] >> (45 - 6 * (i % 8) - 3 * h)) & 7 for h in (0, 1)]
-        print('    %05o  %016o  %o%o' % (0o10 + i, x, *f))
-    for name, k in (('literal', nlit), ('reference', nref)):
-        for x in w[p:p + k]:
+    m['scale'], p = w[p:p + ns], p + ns
+    m['literals'], p = w[p:p + nlit], p + nlit
+    m['refs'], p = w[p:p + nref], p + nref
+    m['exports'] = [(w[i], w[i + 1]) for i in range(p, p + nexp, 2)]
+    return m
+
+
+def kind(m, i, h):
+    """Scale kind of half h (0 - left) of image word i."""
+    return (m['scale'][i // 8] >> (45 - 6 * (i % 8) - 3 * h)) & 7
+
+
+def module(zs, z0):
+    m = parse(zs, z0)
+    print('  header %016o %016o: image %o, literals %o, references %o, exports %o'
+          % (m['w0'], m['w1'], len(m['image']), len(m['literals']), len(m['refs']),
+             2 * len(m['exports'])))
+    for i, x in enumerate(m['image']):
+        print('    %05o  %016o  %o%o' % (0o10 + i, x, kind(m, i, 0), kind(m, i, 1)))
+    for name, k in (('literal', 'literals'), ('reference', 'refs')):
+        for x in m[k]:
             print('    %-9s %016o' % (name, x))
-        p += k
-    for i in range(p, p + nexp, 2):
-        print('    export %-6s %016o' % (itm(w[i]), w[i + 1]))
-    return 2 + n + ns + nlit + nref + nexp
+    for name, v in m['exports']:
+        print('    export %-6s %016o' % (itm(name), v))
 
 
 def main():
@@ -79,4 +92,5 @@ def main():
             module(zs, z)
 
 
-main()
+if __name__ == '__main__':
+    main()

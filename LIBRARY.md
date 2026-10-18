@@ -268,13 +268,28 @@ a delimiter [трасса for `!`, `+`, `(`; код for the rest]:
 |---|---|
 | `!` | the name becomes the module name (06501); end |
 | `+` | the name is appended to the list at 010005 + 06470 (06470 counts) |
-| `(` | the name becomes the module name, and `КОНЗАД` := 0 |
-| `)` | closes the group |
+| `(` | the name becomes the module name (06501), and `КОНЗАД` := 0. A second `(` overwrites 06501, and that name is not listed: `ГЛАВ(ПЕРВ+ВТОР(ТРЕТ+ЧЕТВ))` gives main `ВТОР`, list `ПЕРВ ТРЕТ ЧЕТВ 0 0`, no error [трасса] |
+| `)` | the name goes to the list, and the next slot is set to 0, which ends the list [трасса] |
 | `:` | the name goes to 010003 |
 | `-` | the name goes to 010004 |
 | `,` | the name goes to 010000 |
-| `/`, `.` | stored in the list with a marker; purpose unknown |
+| `/` | a control word `0020000000000000` goes to the list, then the name: `ВТОР/ТРЕТ` gives `0020000000000000 ВТОР ТРЕТ` [трасса] |
+| `.` | only after the letter `А` or `Л`, which is not a module name: the control word `0020000000000001` (`А.`) or `0020000000000004` (`Л.`) goes to the list; any other name is error 23 [трасса for `А.`, `Л.`; код for the error] |
 | other | error 23 |
+
+The key `РК,ГЛАВ(ПЕРВ+ВТОР/ТРЕТ+А.ЧЕТВ+Л.ПЯТ)!` gives the list
+`ПЕРВ 0020000000000000 ВТОР ТРЕТ 0020000000000001 ЧЕТВ 0020000000000004
+ПЯТ 0` at 010005–010015 [трасса, f1a 05122/05136/05142]. The control
+words are the only way to give the loader structure inside the list,
+since the parentheses do not nest; they look like overlay marks (see
+"Linking loader: expected behaviour"). `А` stands for абзац (one sector,
+0400 words) and `Л` for лист (02000 words, four абзацы), so the low part
+of the control word is the boundary in абзацы: 1 for `А.`, 4 for `Л.`,
+and 0 for `/`. The translator itself is overlaid on абзац boundaries:
+ФАЗ1Б/ФАЗ2Б share 06000–06377, ФАЗ2В (05000–05777) overlays the upper
+half of ФАЗ2А, and the phases are read by the sector exchanges at aitm6
+06760–06763. `tools/itmload.py` reads the words as overlay segments
+([AITM-object.md](AITM-object.md), section 7).
 
 Numbers go to 010001/010002 (an address range; defaults 010 and 070000)
 [код]. The working forms are `РАК,ИМЯ!` (store) and
@@ -303,6 +318,9 @@ mounted) makes an entry with name 0, which reads as the end of the
 list, so a name is required.
 
 ### Module layout
+
+The format, and how entry and external names are recorded, is described
+in detail in [AITM-object.md](AITM-object.md).
 
 `ВЫВМ` builds the module at 014000 and `КОНВЫВ` writes it to
 consecutive zones starting from the first zone (05736 zones):
@@ -432,9 +450,12 @@ an `Л;` word whose address kind is not 0: `kind << 45 | field
 descriptor (07272) | value << 15 | word address`. In `ext1`,
 `Л1:ДВН(5)/30=КТ1/0` at 021 gives:
 
-- `6723000000100021`: field `Д` (descriptor 0723), kind 6, reference
-  record 1;
-- `1545400001400021`: field `К` (descriptor 05454), kind 1, `Т1` = 014.
+- `6723000000100021`: field `Д` at `/30` (bits 42–45 width − 1 = 016,
+  bits 36–41 top bit 046), kind 6, reference record 1;
+- `1545400001400021`: field `К` at `/0` (013, 013), kind 1, `Т1` = 014.
+
+The field descriptor is decoded in [AITM-object.md](AITM-object.md),
+section 4.4.
 
 The word itself holds the absolute values (`0000000100000014`), and its
 scale is 0. Labels (kind 1), `Р` names (kind 2) and external names
@@ -444,8 +465,9 @@ name, no literals or records are written.
 Exports of `Э;` names keep their kind: `ВН 5000000000000000`, `Р2
 2000000000000010`.
 
-Not reached: the literal-table overflow (f2a 05507, error 61) and the
-04000 flag on a literal number (05513–05514, set when 05457 ≠ 0).
+A minus before an external name (`СЧ-ВН`) sets flag 04000 in the
+literal number (05513–05514, when 05457 ≠ 0) [опыт, `ext3`]. Not
+reached: the literal-table overflow (f2a 05507, error 61).
 
 ### Store path (`КАТ26` → `КОНВЫВ`)
 
@@ -487,6 +509,10 @@ reads 067: its only information words are 05747, 05750 and 05751. The
 Makefile drops `lib6`'s 0414 coverage, which is not code.
 
 ### Linking loader: expected behaviour
+
+A host-side implementation of these steps, with the conventions it
+chooses, is `tools/itmload.py` ([AITM-object.md](AITM-object.md),
+section 7).
 
 What the missing program in drum 21 zone 014 receives from the
 translator, and what it must do. [вывод] marks what follows from the
@@ -586,12 +612,10 @@ with `А` [трасса z14p, z14pn].
    entry must be a convention: the first image word, an exported name,
    or one of the names after `,`, `:` or `-`.
 
-**Not specifiable yet.**
+**Not specifiable yet.** (The two kinds of reference record are told
+apart by bits 46–48: 0 for `literal << 30 | offset`, the kind for an
+`Л;` field [опыт, AITM-object.md].)
 
-- How the two kinds of reference record are told apart: a kind-6
-  record (`literal << 30 | offset`) has 0 in bits 46–48, while an `Л;`
-  record has its kind there. An `Л;` field of kind 0 makes no record,
-  so a 0 in bits 46–48 seems to mark the kind-6 form [вывод].
 - Where the `Р` area goes, and whether modules share it (a common
   block) or each gets its own.
 - The meaning of the `,`, `:`, `-`, `/`, `.` items.
