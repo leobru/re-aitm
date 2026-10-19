@@ -3,6 +3,9 @@
 
 Usage: tools/vol.py 2222 > lib.txt
 
+An entry with descriptor bit 48 = 0 is a linked program stored by
+tools/itmload.py --store (AITM-object.md, section 7).
+
 Zone 0 is the catalogue: pairs (name in ITM, right-justified; descriptor),
 terminated by a zero name whose second word is the first free zone.  A
 freed entry has name -1.  Descriptor (КОНВЫВ, f2a):
@@ -74,6 +77,20 @@ def module(zs, z0):
         print('    export %-6s %016o' % (itm(name), v))
 
 
+def program(zs, z0):
+    """Linked program stored by tools/itmload.py --store (descriptor bit
+    48 = 0): header, root image, Э70 table, exports."""
+    w = [x for z in zs[z0:] for x in z]
+    n, nseg = w[0] >> 33, (w[0] >> 22) & 0o3777
+    nexp, tab, start = w[1] >> 36, (w[1] >> 15) & 0o77777, w[1] & 0o77777
+    print('  stored program %016o %016o: root %o, segments %o, table %05o, start %05o'
+          % (w[0], w[1], n, nseg, tab, start))
+    for i, x in enumerate(w[2:2 + n]):
+        print('    %05o  %016o%s' % (0o10 + i, x, '  Э70' if 0o10 + i >= tab and x else ''))
+    for i in range(2 + n, 2 + n + nexp, 2):
+        print('    export %-6s %016o' % (itm(w[i]), w[i + 1]))
+
+
 def main():
     zs = zones(sys.argv[1])
     cat = zs[0]
@@ -89,7 +106,7 @@ def main():
         print('%03o  %-6s  %016o  flag %o, length %o, D05740 %o, zone %o'
               % (i, itm(name), d, d >> 47, ln, x, z))
         if z < len(zs):
-            module(zs, z)
+            (module if d >> 47 else program)(zs, z)
 
 
 if __name__ == '__main__':

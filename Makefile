@@ -72,7 +72,20 @@ traces/ext1.ev traces/ext3.ev traces/ext4.ev: traces/%.ev: jobs/%.b6
 # Оверлеи: link3 кладёт ПЕЧБ с теми же входами ПЕЧ, ДВА и другими
 # текстами; ГЛАВ(Л.ПЕЧ/Л.ПЕЧБ) - два сегмента с листа 02000, задание с
 # сегментом 1 печатает тексты ПЕЧ (traces/ovl1.txt), с сегментом 2 - ПЕЧБ
-link: traces/link.txt traces/ovl1.txt traces/ovl2.txt
+# Запись связанной программы: link4 кладёт ГЛАВ2, которая вызывает ПЕЧ,
+# читает сегмент 2 экстракодом Э70 по словам у внешнего имени СЕГ2 и
+# снова вызывает ПЕЧ; itmload --store пишет ПРОГ = ГЛАВ2(Л.ПЕЧ/Л.ПЕЧБ)
+# в traces/prog.vol, задание грузит корень и сегмент 1 (traces/prog.txt:
+# ПРИВЕТ ВСЕМУ, ЗДРАВСТВУЙТЕ)
+link: traces/link.txt traces/ovl1.txt traces/ovl2.txt traces/prog.txt
+traces/link4.ev: jobs/link4.b6 traces/link3.ev
+	VOLIN=traces/link3.vol VOLOUT=traces/link4.vol tools/trace.sh $< traces/link4.txt | tools/phases.py - traces/link4.cov > $@
+traces/prog.txt: traces/link4.ev tools/itmload.py tools/vol.py
+	tools/itmload.py 'РАК,ГЛАВ2(Л.ПЕЧ/Л.ПЕЧБ)!' traces/link4.vol --store ПРОГ traces/prog.vol > traces/prog.map
+	tools/itmload.py 'ПРОГ!' traces/prog.vol -o traces/prog.b6 >> traces/prog.map
+	tools/vol.py traces/prog.vol > traces/prog.lib
+	cd traces && cp prog.vol 2222 && timeout -s KILL 60 dispak --path=.:$${BESM6_PATH:-/usr/local/share/besm6} prog.b6 > prog.txt; rm -f 2222
+	grep -q 'ЗДРАВСТВУЙТЕ' $@
 traces/link3.ev: jobs/link3.b6 traces/link2.ev
 	VOLIN=traces/link2.vol VOLOUT=traces/link3.vol tools/trace.sh $< traces/link3.txt | tools/phases.py - traces/link3.cov > $@
 traces/ovl%.txt: traces/link3.ev tools/itmload.py tools/vol.py
@@ -91,6 +104,44 @@ traces/link.txt: traces/link2.ev tools/itmload.py tools/vol.py
 	tools/itmload.py 'РАК,ГЛАВ(ПЕЧ)!' traces/link2.vol -o traces/link.b6 > traces/link.map
 	cd traces && timeout -s KILL 60 dispak link.b6 > link.txt
 	grep -q 'ПОКАЖИ ЛЮДЯМ' $@
+
+# Загрузчик на БЕМШ (zagr/parts/zagr.be) в зоне 0414 копии 2148
+# (traces/zagr.2148): задания zl1-zl5 переводят главный модуль с ключом
+# Р и списком, ЗАВЕР передаёт управление загрузчику. traces/zlN.txt -
+# печать, traces/zlN.zcmp - сверка памяти перед пуском с itmload
+# (tools/memcmp.py). zl3 - нет модуля в каталоге.
+ZLJOBS := zl1 zl2 zl3 zl4 zl5
+zagr: $(addprefix traces/,$(addsuffix .zcmp,$(ZLJOBS)))
+zagr/parts/zagr.new: zagr/parts/zagr.be
+	$(MAKE) -C zagr
+traces/zagr.2148: zagr/parts/zagr.new tools/mkz14.py
+	@mkdir -p traces
+	tools/mkz14.py $@ --image $<
+traces/zl1.txt traces/zl1.zcmp: ZLVOL = traces/link1.vol
+traces/zl1.txt traces/zl1.zcmp: ZLKEY = РАК,ГЛАВ(ПЕЧ)!
+traces/zl1.txt: ZLTEXT = ПОКАЖИ ЛЮДЯМ
+traces/zl2.txt traces/zl2.zcmp: ZLVOL = traces/link3.vol
+traces/zl2.txt traces/zl2.zcmp: ZLKEY = РАК,ГЛАВ(Л.ПЕЧ/Л.ПЕЧБ)!
+traces/zl2.txt: ZLTEXT = ПОКАЖИ ЛЮДЯМ
+traces/zl3.txt traces/zl3.zcmp: ZLVOL = traces/link1.vol
+traces/zl3.txt: ZLTEXT = ЗАГР: НЕТ МОДУЛЯ  НЕТУ
+traces/zl4.txt traces/zl4.zcmp: ZLVOL = traces/link1.vol
+traces/zl4.txt traces/zl4.zcmp: ZLKEY = РАК,СЛОЖН(ПЕЧ)!
+traces/zl4.txt: ZLTEXT = ПРИВЕТ ВСЕМУ
+traces/zl5.txt traces/zl5.zcmp: ZLVOL = traces/lib5.vol
+traces/zl5.txt traces/zl5.zcmp: ZLKEY = РАК,ГЛ5(Л.ВТОР/Л.ТРЕТ+ВТОР/ВТОР+ПЕРВ)!
+traces/zl5.txt: ZLTEXT = КОНЕЦ ЗАДАЧИ
+traces/zl1.txt traces/zl3.txt traces/zl4.txt: traces/link1.ev
+traces/zl2.txt: traces/link3.ev
+traces/zl5.txt: traces/lib5.ev
+traces/zl%.txt: jobs/zl%.b6 traces/zagr.2148
+	VOL2148=traces/zagr.2148 VOLIN=$(ZLVOL) VOLOUT=traces/zl$*.vol tools/trace.sh $< $@ > /dev/null
+	grep -q '$(ZLTEXT)' $@
+traces/zl%.zcmp: traces/zl%.txt tools/itmload.py tools/memcmp.py
+	if [ -n '$(ZLKEY)' ]; then \
+	  tools/itmload.py '$(ZLKEY)' traces/zl$*.vol -o traces/zl$*.ref.b6 > /dev/null && \
+	  VOL2148=traces/zagr.2148 VOLIN=$(ZLVOL) tools/memcmp.py jobs/zl$*.b6 traces/zl$*.ref.b6 > $@; \
+	else echo 'без сверки' > $@; fi
 
 # Зона 0414 (связывающий загрузчик) с пробой (tools/mkz14.py) на копии 2148:
 # lib6 (с А) и lib6n (без А) на томе lib5; проба читает входы загрузчика
@@ -121,4 +172,4 @@ check:
 clean:
 	rm -f 2222 parts/*.new parts/*.b6 parts/*.lst
 
-.PHONY: all zones traces parts be check clean link
+.PHONY: all zones traces parts be check clean link zagr

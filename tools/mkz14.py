@@ -2,6 +2,11 @@
 """Make a copy of volume 2148 with a probe in zone 0414 (the linking loader).
 
 Usage: tools/mkz14.py [out.2148]        (default traces/z14mock.2148)
+       tools/mkz14.py out.2148 --image zagr/parts/zagr.new
+
+With --image, the whole zone 0414 gets the 02000 words of the image
+(6-byte words of addresses 0-01777, as tools/reasm.pl writes them): the
+linking loader of zagr/ instead of the probe.
 
 ЗАВЕР (aitm6 06517) reads drum 21 zone 014 = 2148:0414 into 0-01777 and
 jumps to 011 instead of Э74.  The probe at 011 reads what the loader would
@@ -36,6 +41,14 @@ def main():
     out = sys.argv[1] if len(sys.argv) > 1 else 'traces/z14mock.2148'
     b = bytearray(open(SRC, 'rb').read())
     base = (0o414 + ZONE_OFFSET) * ZONE + 8 * 8
+    if '--image' in sys.argv:
+        img = open(sys.argv[sys.argv.index('--image') + 1], 'rb').read()
+        for i in range(len(img) // 6):
+            a = base + i * 8
+            old = struct.unpack('<Q', b[a:a + 8])[0]
+            b[a:a + 8] = struct.pack('<Q', (old & ~M48) | int.from_bytes(img[i * 6:i * 6 + 6], 'big'))
+        open(out, 'wb').write(b)
+        return
     for i, (l, r) in enumerate(PROBE):
         a = base + (START + i) * 8
         old = struct.unpack('<Q', b[a:a + 8])[0]

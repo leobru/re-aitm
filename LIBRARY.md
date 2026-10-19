@@ -512,7 +512,8 @@ Makefile drops `lib6`'s 0414 coverage, which is not code.
 
 A host-side implementation of these steps, with the conventions it
 chooses, is `tools/itmload.py` ([AITM-object.md](AITM-object.md),
-section 7).
+section 7). A BEMSH program with the same run mode, for zone 0414, is in
+`zagr/` (section 8).
 
 What the missing program in drum 21 zone 014 receives from the
 translator, and what it must do. [вывод] marks what follows from the

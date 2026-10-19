@@ -331,6 +331,7 @@ follow it.
 
 ```
 tools/itmload.py 'РАК,ГЛАВ(ПЕРВ+ВТОР)!' LIB[/ZONE] [-o job.b6] [--seg N] [--common]
+                 [--store ИМЯ OUT.vol] [--vol N]
 ```
 
 - **Inputs.** The key `Р`: the main module is the name before `(`, and
@@ -376,10 +377,72 @@ follows [вывод: the translator only passes the words on]:
   - A reference from the root must have the same address in every
     segment that defines the name, otherwise it is an error
     (`ГЛАВ(ПЕЧ/Л.ПЕЧБ)`: `ПЕЧ` is at 014 and at 02000).
-- The job holds only the root and the chosen segment. A program that
-  switches segments at run time would have to read the other images
-  itself; the script records nothing for that, because the module
-  format has no name or information word for a segment.
+- The job holds only the root and the chosen segment. To switch
+  segments at run time, the program must be stored with `--store`
+  (below) and read the segments itself.
+
+**Storing a linked program** (`--store ИМЯ OUT.vol`) [вывод: a format
+chosen for the script, modelled on how the translator's own phases are
+stored and read]. The program is linked as above, with three changes:
+- the first module of each segment is put at least on an абзац
+  boundary;
+- the `Р` areas start on an абзац boundary;
+- the root gets a **segment table** right after the main module. The
+  table holds one Э70 word per sector of each segment, and each
+  segment's run of words ends with 0.
+
+The loader defines the names `СЕГ1`, `СЕГ2`, … as the addresses of
+these runs. The program reads segment n itself: it declares
+`Э;С2:Н=СЕГ2,` and loops `Э070` over the words up to the 0.
+
+`ГЛАВ2` (`jobs/link4.b6`) does this:
+
+```
+К;НАЧ:12ПВПЧ=,1ПАС2=,
+Ц:1Э070=,1СА1=1СЧ,
+У1Ц=,12ПВПЧ=,=Э074,
+```
+
+The Э70 word reads one sector of unit 067 to its place [опыт;
+decoded from dispak `ddio`]:
+
+| Bits | Contents |
+|---|---|
+| 45–48 | 010: sector exchange |
+| 37–43 | 010: read |
+| 36 | 04000 of the left address: the sector is given by number (КУС) |
+| 31–35 | лист of the memory address |
+| 25–26 | абзац within the лист |
+| 13–19 | 067: unit |
+| 3–7 | zone (only 0–037 in this form) |
+| 1–2 | sector in the zone |
+
+For example `4010410000670025` reads zone 5, sector 1 to 02000. The
+translator's own phase words (aitm6 06760–06763) have the same layout
+for drum 21, without the 04000.
+
+The record is a new catalogue entry: the old entry with that name is
+freed (−1), and the record goes to the free zone. Its descriptor has
+bit 48 = 0, which marks a stored program instead of a module. Bits
+33–47 hold the length in words, and bits 1–10 the first zone. The
+record itself:
+
+| Words | Contents |
+|---|---|
+| 0 | root length (from 010, table included) << 33 \| segments << 22 |
+| 1 | export words << 36 \| table address << 15 \| start |
+| 2 … | root image, already linked |
+| then | exports: (name, address) of the root, `СЕГn` included |
+| from the next sector | the segments, sector after sector, as the table reads them |
+
+All words are written with the instruction tag (dispak keeps it in bit
+49 of a volume word), so code read by Э70 can be executed.
+
+`tools/itmload.py 'ИМЯ!' LIB` recognises a stored program by bit 48.
+It does not link it again: the job loads the root and segment
+`--seg`, taken from the volume through the table, and mounts the volume
+as `ЛЕНТ 67(--vol)`. `tools/vol.py` prints such an entry as
+`stored program`.
 
 Relocation follows sections 3–4:
 - A long half-word (bit 20 set) has a 15-bit address.
@@ -410,7 +473,123 @@ allowed.
   - kinds 5 and 6;
   - the `Л;` record;
   - a store into the `Р` area.
+- `jobs/link4.b6` stores `ГЛАВ2`, which reads segment 2 by `СЕГ2`.
 - `ГЛАВ(Л.ПЕЧ/Л.ПЕЧБ)` puts both segments at 02000, with the `Р` areas
   at 02015 and 02021. With `--seg 1` the job prints the texts of `ПЕЧ`,
   with `--seg 2` «ЗДРАВСТВУЙТЕ» and «ПРОЩАЙТЕ ВСЕ» twice
   (`traces/ovl1.txt`, `traces/ovl2.txt`) [опыт].
+- `ГЛАВ2(Л.ПЕЧ/Л.ПЕЧБ)` is stored as `ПРОГ` (`traces/prog.vol`, zone 5:
+  the record in sector 0, segments in sectors 1 and 2). The job of
+  `ПРОГ!` starts with segment 1. The program prints «ПРИВЕТ ВСЕМУ»,
+  reads segment 2 by Э70 and prints «ЗДРАВСТВУЙТЕ» (`traces/prog.txt`)
+  [опыт].
+
+## 8. Loader in BEMSH for zone 0414 (`zagr/`)
+
+`zagr/parts/zagr.be` is a BEMSH program with the run mode of
+`tools/itmload.py`. It links the main module and the list, resolves
+external names, handles overlays and starts the program. It lies in
+zone 0414 of a copy of 2148, where `ЗАВЕР` expects the lost loader.
+Storing a linked program in the library is not implemented yet.
+
+Build and tests:
+
+```
+make -C zagr              # zagr/parts/zagr.new (tools/reasm.pl, no original to compare)
+make zagr                 # traces/zagr.2148 (tools/mkz14.py --image), jobs zl1–zl5
+```
+
+**What it receives** [трасса]:
+- `ЗАВЕР` reads zone 0414 over page 0 and jumps to 011.
+- The main module, as `ВЫВМ` built it, is still at 014000. Its name is
+  in 06501 and its `Р` size in 05740.
+- The key block is on drum 020 tract 016 from word 01000: names and the
+  control words of `/`, `А.`, `Л.`, ending with 0 (LIBRARY.md).
+- The catalogue is zone 0 of unit 067.
+
+**Memory.** Short commands address only 0–07777, so the loader stays in
+page 0, where it is read:
+
+| Addresses | Contents |
+|---|---|
+| 0–01777 | the loader: a copy of the pager plus its own code and data |
+| 02000–03777 | pager windows |
+| 04000–05777 | key block, then the 067 catalogue |
+| 06000 | list; 06100 module table (8 words per module); 06500–07774 names (3 words each) |
+| 010000–010377 | zeros for filling the image |
+| 014000 … | the main module |
+| 030000–047777 | buffer for one library module (4 zones) |
+| 051775–051777 | the starting stub |
+
+**Building through the pager.**
+- **Virtual memory.** The image is built in virtual memory on drums
+  020–027, so the segments together can be much larger than core:
+  - the root and segment 1 go to v060000 + address, as the translator
+    lays out a program;
+  - segment s ≥ 2 goes to v160000 + (s − 2)·0100000 + address, which
+    limits the list to 7 segments.
+- **A copy of the pager.** The pager `ОБМЕН`/`ЛСТБАР` lives in the
+  resident page 0, which zone 0414 replaces, so the loader carries a
+  copy of it at the same addresses 00014–00160. It has to stay there:
+  `уиа 49(М3)` followed by `по (М3)` jumps to 061.
+- **Moved data.** The pager's data block (00660–00712 in `aitm0`) and
+  its constants are copied under their labels to other places in page
+  0. The mask at 011 moves away, because 011 is the entry point.
+- **Zero filling.** A tract touched for the first time is written from
+  core page 0 (VM.md), so the loader first fills the run image with
+  zeros.
+
+**Steps.**
+1. Lay out the modules as in section 7.
+2. Pass 1 collects the export tables of all modules. The main module is
+   read in place; the others are read from 067 into the buffer.
+3. Pass 2 relocates each module in place, by its scale and `Л;`
+   records, and writes it to its virtual range. Every segment is
+   linked, not only segment 1.
+4. Start:
+   - write back the dirty windows;
+   - read pages 1 … L of the run image from drum 020 tracts 031 … with
+     Э70;
+   - copy a 3-word stub to 051775. With the information word in 051777,
+     the stub reads page 0 (tract 030) and jumps to `НАЧ` or 010.
+5. Errors are printed by Э64 as «ЗАГР: …» followed by a name, and the job
+   ends with Э74. The cases are:
+   - НЕТ МОДУЛЯ;
+   - НЕТ ИМЕНИ;
+   - ИЗ СЕГМЕНТА;
+   - РАЗНЫЙ АДР.;
+   - КОРОТК. АДР.;
+   - МНОГО ПАМЯТИ: more than 7 segments, more than 31 list modules, the
+     run image past 050000, or the name table full;
+   - БОЛЬШОЙ МОД.: a library module longer than 4 zones, or the main
+     module past 030000.
+
+The program must end below 050000, because page 024 holds the stub and
+the jobs order `ЛИСТ 0-24`.
+
+**BEMSH details.** BEMSH puts an extracode in the right half of a word,
+with `мода 0` in the left half. Execution then goes on in the next word,
+whose left half is the `дк 0,0` written after the extracode, i.e. a
+`зп` to cell 0. The translator uses that as a no-op too.
+
+**Check** (`make zagr`, `tools/memcmp.py`). Each job is translated with
+key `РАГК,ИМЯ(…)!` on a library volume of the `link`/`lib` chains. The
+job runs under the dispak debugger with a breakpoint at 051776, after
+page 0 is read and before the jump. Every word that
+`tools/itmload.py -o` loads for the same key is dumped and compared:
+
+| Job | Key | Printout | Memory vs itmload |
+|---|---|---|---|
+| `zl1` | `ГЛАВ(ПЕЧ)` | «ПРИВЕТ ВСЕМУ», «ПОКАЖИ ЛЮДЯМ» ×2 | 17 words, equal |
+| `zl2` | `ГЛАВ(Л.ПЕЧ/Л.ПЕЧБ)` | the same: segment 1 at 02000 | 17 words, equal |
+| `zl3` | `ГЛАВ(ПЕЧ+НЕТУ)` | «ЗАГР: НЕТ МОДУЛЯ  НЕТУ» | — |
+| `zl4` | `СЛОЖН(ПЕЧ)` | «ПРИВЕТ ВСЕМУ» | 22 words, equal |
+| `zl5` | `ГЛ5(Л.ВТОР/Л.ТРЕТ+ВТОР/ВТОР+ПЕРВ)` | — | 1113 words, equal |
+
+What the jobs cover:
+- `zl4` has kinds 1–4 in half-words, kinds 5 and 6 with and without
+  minus, and `Л;` records of kinds 1, 2, 5 and 6.
+- `zl5` builds three segments of up to 02130 words through the pager,
+  across tract boundaries.
+
+All results are [опыт].

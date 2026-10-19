@@ -1,0 +1,9 @@
+# Generated (as in the top-level .gitignore)
+2222
+parts/*.new
+parts/*.b6
+parts/*.lst
+parts/*.obj
+macros.lib
+macros.asm.b6
+macros.be.lst

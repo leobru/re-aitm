@@ -20,6 +20,7 @@
 #    the part out of them to parts/NAME.new and compares it with
 #    parts/NAME.bin (word 0 of an image at 0 is taken from the original:
 #    the zone holds a marker there, memory cell 0 is always zero).
+#    Without parts/NAME.bin (a new program) the image is only written.
 # With a single part in parts.txt there are no links to resolve: the
 # translation job itself loads the module at its address (НАЗ, ЗОНГП into
 # zone 0400 of 2222, as re-dispak/zongp.pl does) and step 2 is skipped.
@@ -188,8 +189,14 @@ for $p (@parts) {
     open(Z, '<:raw', "$new.zones") || die;
     local $/; my $img = <Z>; close(Z);
     unlink("$new.zones");
-    open(O, '<:raw', $orig) || die; my $ob = <O>; close(O);
     my $nb = substr($img, ($naz & 01777) * 6, $plen{$p} * 6);
+    if (!-e $orig) {
+        # no original (a new program, e.g. zagr/): just the image
+        open(N, '>:raw', $new) || die; print N $nb; close(N);
+        print "$new written\n";
+        next;
+    }
+    open(O, '<:raw', $orig) || die; my $ob = <O>; close(O);
     substr($nb, 0, 6) = substr($ob, 0, 6) if $skip;
     open(N, '>:raw', $new) || die; print N $nb; close(N);
     my $diff = `cmp -l $orig $new | wc -l`;
