@@ -665,6 +665,16 @@ statement:
   a short command is set.
 - **Data words** (`конд`, `текст`, `пам`) become `С;` with their 16
   octal digits.
+- **Text words.** A data word that the BEMSH comment marks as ITM text
+  (`ITM 'ОШИБКА'`) becomes an `А;` constant of its six characters,
+  decoded from the binary (`D01112:ОШИБКА,`, ` МЛ31 ,` with its spaces).
+  Words holding codes that a dispak deck cannot type stay in `С;`: 040,
+  0140 (end of information), 0142 (set position) and 0173 (end of
+  line). On a terminal these are entered as `:×`, `::`, `:>`, but
+  dispak reads deck text only through `gost_to_itm`, and in `А;` such
+  pairs give error 23. Such a word keeps the BEMSH comment as an ITM
+  note (`3043731443546615,‘{ПОЗ}(ИСПР‘`). Of the 38 marked
+  words, 29 are written as text.
 - **Block structure.** The outer block holds `Э;НАЗ:П=адрес,` and the
   external names (`X:Н=X,`) of the labels the part uses from other
   modules, as its `внеш` lines say. Everything else is in an inner block,

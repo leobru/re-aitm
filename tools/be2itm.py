@@ -17,7 +17,12 @@ line) and parts/NAME.bin (the words).  Every word becomes one statement:
   label (label(n) for label+n), so ITM marks it relocatable or external;
   otherwise it is the octal number (negative for bit 19 of a short
   command);
-- a data word (конд, текст, пам): С; with its 16 octal digits.
+- a data word (конд, текст, пам): С; with its 16 octal digits; a word
+  the BEMSH comment marks as ITM text (ITM '...') becomes А; with its
+  six characters, decoded from the binary, if each of them can be typed
+  on a card (not 040, 0140 КИ, 0142 ПОЗ, 0173 ПС: their glued ':' input
+  is the terminal's, dispak decks have none); such a word stays in С;
+  with the comment as an ITM note ‘...‘.
 Labels of the part stay on their words.  Labels other parts use are
 marked * (entries, exported with key Г from the inner block).  Labels of
 other parts become external names (Э; X:Н=X) - except between different
@@ -53,6 +58,22 @@ SHORT = {0o00: 'ЗП', 0o01: 'ЗМ', 0o03: 'СМ', 0o04: 'АС', 0o05: 'АВ', 0
 LONG = {0o22: 'ИА', 0o23: 'ИК', 0o24: 'ПА', 0o25: 'СА', 0o26: 'У0', 0o27: 'У1',
         0o30: 'ПБ', 0o31: 'ПВ', 0o34: 'И0', 0o35: 'И1', 0o37: 'КЦ'}
 DATA = {'конд', 'текст', 'пам'}
+# ITM codes of the characters an А; constant may hold: letters, digits,
+# space (017) and a few signs, from itm-encoding.txt
+TEXT = {}
+for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
+                           'itm-encoding.txt'), encoding='utf-8'):
+    f = l.split()
+    if f and re.fullmatch(r'[0-7]{3}', f[0]):
+        c = ' ' if f[1] == '<space>' else f[1]
+        if len(c) == 1 and (c.isalnum() or c in ' ._-()+/'):
+            TEXT[int(f[0], 8)] = c
+
+
+def text(w):
+    """The six characters of an ITM text word, or None."""
+    cs = [TEXT.get(w >> 40 - 8 * i & 0o377) for i in range(6)]
+    return None if None in cs else ''.join(cs)
 
 
 def words(name):
@@ -177,10 +198,17 @@ def main():
             lab = (('*' if (p, lab) in exported else '') + lab + ':') if lab else ''
             entry = lay.get(a)
             if entry is None or isinstance(entry, tuple):
-                if section != 'С':
+                n = entry and entry[1]
+                t = n and "ITM '" in src[n - 1] and text(w)
+                if t and section != 'А':
+                    body.append('А;')
+                    section = 'А'
+                elif not t and section != 'С':
                     body.append('С;')
                     section = 'С'
-                body.append('%s%o,' % (lab, w))
+                c = n and not t and re.search(r"ITM '(.*)'", src[n - 1])
+                body.append('%s%s,%s' % (lab, t or '%o' % w,
+                                         '‘%s‘' % c.group(1) if c else ''))
                 continue
             halves = []
             for h, n in zip((w >> 24, w & 0o77777777), entry):
