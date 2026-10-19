@@ -828,6 +828,19 @@ zone 013). The modules export 476 entries; with the `НАЗ` entries and
   `tools/itmload.py --store` writes from the same library.
 - Each module alone, placed at its `НАЗ`, also matches its parts
   (`tools/itmcmp.py module`).
+- **The stored `АИТМЗ` works.** `tools/itmdeck.py --stored VOL АИТМЗ`
+  makes a deck that loads its root and segment 1 (phase 1) from the
+  record. A starter at 027770 does what the deck's loader and `ЗАГР`
+  (aitm6 06770) do before `ПУСК1`:
+  - `Э50 0112`: volume 2148 from zone 0400 for physical drum 21;
+  - A = 06776 + N, М1 = М2 = 0, М16 = 06777;
+  - jump to 010.
+
+  The extracode stands in the right half: after an extracode in the
+  left half, execution goes on with the next word. On `itm/privet.itm`
+  the printout, with the listing and «ПРИВЕТ ВСЕМУ», equals that of the
+  deck with АИТМ from the zones of 2148. Phase 2 still comes from 2148
+  by the translator's own Э70, since its code is unchanged.
 
 **What it took in the loaders:**
 - the `НАЗ` placement;
