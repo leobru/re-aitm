@@ -29,6 +29,13 @@
 #            a label of the part directly; missing labels Dааааа are added;
 #   A КОНД word that is text in the 8-bit code of БЕМШ is written as
 #   КОНД Т'...' (see t8const).
+#   SEGREF = {'05450': 'f2a', ...}       literal addresses of a resident
+#            part in the overlay area: the overlay part (of the phase in
+#            which the command runs) that owns the address; treated as
+#            if that part were in USES for this address alone. An address
+#            that the resident code of several phases uses is a list of
+#            parts ['f1a', 'f2a']: a shared entry, with the same name in
+#            NAMES of each, all of them export it, ВНЕШ names the first;
 #   NOTADDR = ['76001', ...]            literal values that are numbers (loop
 #            counters), not addresses in a part of USES: left as they are;
 #   TOP    = '''* ...'''                block comment after the СТАРТ lines;
@@ -219,6 +226,36 @@ def modules():
 
 # a literal address operand 'ааааа' (not a constant like п'2000')
 LITADDR = r"(?<![А-Яа-яA-Za-z])'([0-7]{4,5})'"
+# operations whose operand is a memory address or a jump target: for them
+# any literal ('630', '55') and a decimal number (12) is an address too;
+# so are extracodes 060-077 (information words), from 0100
+ADDROPS = {'зп', 'зпм', 'счм', 'сл', 'вч', 'вчоб', 'вчаб', 'сч', 'и', 'нтж',
+           'слц', 'знак', 'или', 'дел', 'умн', 'сбр', 'рзб', 'чед', 'нед',
+           'слп', 'вчп', 'сд', 'рж', 'мод', 'по', 'пе', 'пб', 'пв', 'пвл',
+           'пио', 'пино', 'цикл'}
+
+
+def litaddrs(op, opnd, lo, hi):
+    """(start, end, address) of the literal addresses in the operand opnd
+    of op: 'ааааа' (any number of digits for ADDROPS), a decimal number
+    for ADDROPS, a label+N of a part at lo..hi that falls outside it (the
+    disassembler writes an address after the part so). With an index
+    register (not REGDEST) an address below 0100 is the offset of a field
+    and is left out."""
+    res = []
+    ec = re.fullmatch(r'Э[67][0-7]', op)
+    pat = LITADDR.replace('4,5', '1,5') if op in ADDROPS or ec else LITADDR
+    for m in re.finditer(pat, opnd):
+        res.append((m.start(), m.end(), int(m.group(1), 8)))
+    m = re.match(r'(\d+)(?=$|[(,])', opnd)
+    if m and op in ADDROPS:
+        res.append((m.start(), m.end(), int(m.group(1))))
+    for m in re.finditer(r'(?<![А-Я0-9A-Z])[GD]([0-7]{5})([+-]\d+)(?!\d)', opnd):
+        a = int(m.group(1), 8) + int(m.group(2))
+        if not lo <= a < hi:
+            res.append((m.start(), m.end(), a))
+    return [(b, e, a) for b, e, a in res if a and not (
+        a < 0o100 and (ec or opnd[e:e + 2] == '(М' and op not in REGDEST))]
 
 
 def ranges():
@@ -250,14 +287,18 @@ def ext_map(part):
     lo, hi = rng[part]
     res = {}
     uses = load_notes(part).get('USES', [])
+    segref = load_notes(part).get('SEGREF', {})
     notaddr = {int(a, 8) for a in load_notes(part).get('NOTADDR', [])}
     for l in open('parts/%s.dis' % part, encoding='utf-8'):
         f = l.rstrip('\n').split('\t')
         if len(f) < 3:
             continue
-        for m in re.finditer(LITADDR, f[2]):
-            a = int(m.group(1), 8)
+        for b, e, a in litaddrs(f[1], f[2], lo, hi):
             if lo <= a < hi or a in notaddr:
+                continue
+            if '%05o' % a in segref:
+                u = segref['%05o' % a]
+                res['%05o' % a] = u[0] if isinstance(u, list) else u
                 continue
             for u in uses:      # a name of the owner, even outside its range
                 if '%05o' % a in load_notes(u).get('NAMES', {}):
@@ -293,9 +334,15 @@ def exports(name):
     res = {}
     for fn in sorted(os.listdir('notes')):
         other = fn[:-3]
+        segref = load_notes(other).get('SEGREF', {}) if fn.endswith('.py') else {}
         if not fn.endswith('.py') or other == name or \
-                name not in load_notes(other).get('USES', []):
+                name not in load_notes(other).get('USES', []) and \
+                not any(name == u or isinstance(u, list) and name in u
+                        for u in segref.values()):
             continue
+        for a, u in segref.items():         # a shared entry: all export it
+            if isinstance(u, list) and name in u:
+                res[a] = load_notes(name)['NAMES'][a]
         res.update({a: n for a, (n, u) in ext_map(other).items() if u == name})
     return res
 
@@ -453,6 +500,7 @@ def make(name):
     # counted by ЦИКЛ just after)
     exact = {}                      # source line -> (target, 'Мr')
     literal = {}                    # source line -> operand
+    litext = {}                     # names of other parts in literal
     plo, phi = ranges()[name]
     labs0 = dis_labels(name)
     for i, l in enumerate(L, 1):
@@ -470,6 +518,9 @@ def make(name):
         if incode or m.group(2) and (not plo <= t < phi or len(prev) >= 3 and
                                      prev[1] == 'мода' and prev[2].startswith("'")):
             literal[i] = "'%o'(%s)" % (t, r)    # a number, not an address
+            if not incode and '%05o' % t in ext:
+                literal[i] = '%s(%s)' % (ext['%05o' % t], r)
+                litext['%05o' % t] = ext['%05o' % t]
             continue
         if not m.group(2):
             continue
@@ -672,7 +723,7 @@ def make(name):
                 split[i] = inside
                 for a, n in inside:
                     del ekv_own['%05o' % a]
-    used_ext = {}
+    used_ext = dict(litext)
 
     def final(a):                   # the label of an address of this part
         return names.get(a) or lab.get(a) or mods[name]
@@ -680,19 +731,23 @@ def make(name):
     def subst(l):
         def r1(m):
             return rename.get(m.group(1), m.group(1))
+        f = l.split('\t')
+        if len(f) >= 3:             # a label+N of another part first
+            for b, e, a in reversed(litaddrs(f[1], f[2], plo, phi)):
+                if '%05o' % a in ext and re.match('[GD]', f[2][b:e]):
+                    used_ext['%05o' % a] = ext['%05o' % a]
+                    f[2] = f[2][:b] + ext['%05o' % a] + f[2][e:]
+            l = '\t'.join(f)
         l = re.sub(r'(?<![А-Я0-9A-Z])([GD][0-7]{5})(?![0-7])', r1, l)
-
-        def r2(m):
-            a = '%05o' % int(m.group(1), 8)
-            if a in ext:
-                used_ext[a] = ext[a]
-                return ext[a]
-            if a in ekv_own:
-                return ekv_own[a]
-            return m.group(0)
         f = l.split('\t')
         if len(f) >= 3:
-            f[2] = re.sub(LITADDR, r2, f[2])
+            for b, e, a in reversed(litaddrs(f[1], f[2], plo, phi)):
+                a = '%05o' % a
+                if a in ext:
+                    used_ext[a] = ext[a]
+                    f[2] = f[2][:b] + ext[a] + f[2][e:]
+                elif a in ekv_own:
+                    f[2] = f[2][:b] + ekv_own[a] + f[2][e:]
             l = '\t'.join(f)
         return l
 

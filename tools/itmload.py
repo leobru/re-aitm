@@ -151,19 +151,25 @@ def place(md, a):
     return a + len(md.image)
 
 
-def layout(mods, common, table=0, rpad=1):
+def layout(mods, common, table=0, rpad=1, nseg=0):
     """Place the root from 010, then `table` words, every segment from
-    there, the Р areas after the longest segment (from a multiple of
-    rpad).  Returns the end and {segment: (start, end)}."""
+    there, the Р areas after the longest segment and the root (from a
+    multiple of rpad).  A list module in the root (seg 0, see rootnaz)
+    stands at its НАЗ.  Returns the end and {segment: (start, end)}; a
+    segment left without modules is (root, root)."""
     root = place(mods[0], 0o10) + table
     a, spans = root, {}
-    for seg in sorted({md.seg for md in mods[1:]}):
+    for md in mods[1:]:
+        if md.seg == 0:
+            a = max(a, place(md, 0))
+    for seg in range(1, nseg + 1):
         e = root
         for md in mods:
             if md.seg == seg:
                 e = place(md, e)
         ms = [md for md in mods if md.seg == seg]
-        spans[seg] = (min(md.base for md in ms), max(md.base + len(md.image) for md in ms))
+        spans[seg] = (min(md.base for md in ms), max(md.base + len(md.image) for md in ms)) \
+            if ms else (root, root)
         a = max(a, spans[seg][1])
     a = -(-a // rpad) * rpad
     if common:
@@ -284,6 +290,18 @@ def unpack_e70(w):
     return (left >> 6 & 0o37) << 10 | (left & 3) << 8, (right & 0o177) >> 2, right & 3
 
 
+def rootnaz(mods):
+    """A list module with an entry НАЗ whose place overlaps neither the
+    main module nor a module of another group goes to the root (seg 0)."""
+    for md in mods[1:]:
+        if md.naz is None:
+            continue
+        b, e = md.base, md.base + len(md.image)
+        if all(o is md or o.seg == md.seg and o is not mods[0] or
+               o.base + len(o.image) <= b or e <= o.base for o in mods):
+            md.seg = 0
+
+
 def write_program(path, out, z0, name, mods, spans, table, start, names):
     """Store the linked program in a copy of the volume path as out:
       word 0  root length << 33 | segments << 22
@@ -322,7 +340,7 @@ def write_program(path, out, z0, name, mods, spans, table, start, names):
         for j, w in enumerate(md.image):
             core[(md.seg, md.base + j)] = w
     tab = mods[0].base + len(mods[0].image)
-    rootend = tab + len(table)
+    rootend = max([tab + len(table)] + [md.base + len(md.image) for md in mods if md.seg == 0])
     exports = [(n, d[0][0]) for n, d in names.items() if 0 in d]
     rec = [0, 0] + [core.get((0, a), 0) for a in range(rootend)]
     for n, v in exports:
@@ -339,7 +357,7 @@ def write_program(path, out, z0, name, mods, spans, table, start, names):
             sec += 1
         t.append(0)
     assert len(t) == len(table)
-    rec[2 + tab:2 + rootend] = t
+    rec[2 + tab:2 + tab + len(t)] = t
     rec[0] = rootend << 33 | len(spans) << 22
     rec[1] = 2 * len(exports) << 36 | tab << 15 | start
     for j, w in enumerate(rec):
@@ -454,20 +472,22 @@ def main():
                 mods.append(md)
         if segs and not 1 <= a.seg <= len(segs):
             raise LoadError('сегмента %d нет (всего %d)' % (a.seg, len(segs)))
+        layout(mods, a.common, nseg=len(segs))
+        rootnaz(mods)
         extra, table = {}, []
         if a.store:
             # The table of Э70 words: its size depends on the placement
             size = -1
             while size != len(table):
                 size = len(table)
-                end, spans = layout(mods, a.common, size, SECTOR)
+                end, spans = layout(mods, a.common, size, SECTOR, len(segs))
                 table = [0] * sum(-(-(e - b) // SECTOR) + 1 for b, e in spans.values())
             t = mods[0].base + len(mods[0].image)
             for s in sorted(spans):
                 extra[word('СЕГ%d' % s)] = t
                 t += -(-(spans[s][1] - spans[s][0]) // SECTOR) + 1
         else:
-            end, spans = layout(mods, a.common)
+            end, spans = layout(mods, a.common, nseg=len(segs))
         names = link(mods, extra)
         start = 0o10
         for n, v in mods[0].m['exports']:

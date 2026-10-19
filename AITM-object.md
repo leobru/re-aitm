@@ -366,8 +366,16 @@ follows [вывод: the translator only passes the words on]:
 - `/` after a name ends a segment. `ГЛАВ(ПЕРВ+ВТОР/ТРЕТ)` is the root
   `ГЛАВ` plus two segments, `ПЕРВ+ВТОР` and `ТРЕТ`. Every segment
   starts at the end of the root, and the `Р` areas come after the
-  longest segment. Without `/` the list is one segment, i.e. plain
-  linking.
+  longest segment and the root. Without `/` the list is one segment,
+  i.e. plain linking.
+- **A list module in the root.** A module with an entry `НАЗ` belongs to
+  the root if its place overlaps neither the main module nor any module
+  of another group. The test uses a first layout. The module stays at
+  its `НАЗ`, and its names are seen from every segment. The stored root
+  then reaches the end of the farthest root module, zeros in between.
+  `АИТМ(АИТМ6+ФАЗ1А+ФАЗ1Б/ФАЗ2А+ФАЗ2Б/ФАЗ2В)` puts `АИТМ6` (06400–06777,
+  above all three segments) in the root. A group left without modules
+  is an empty segment.
 - `А.` or `Л.` before a name puts that module on an абзац or лист
   boundary. Translator phases are overlaid this way: ФАЗ2В at 05000
   over the upper half of ФАЗ2А, and ФАЗ1Б/ФАЗ2Б at 06000.
@@ -567,7 +575,11 @@ not fit in the zone.
     that is core 010000–027777 and the main module.
 
 **Steps.**
-1. Lay out the modules as in section 7.
+1. Lay out the modules as in section 7. After a first layout, a list
+   module with `НАЗ` that overlaps neither the main module nor a module
+   of another group is moved to the root (segment 0). `РАСК` places the
+   root modules at their `НАЗ`. `КОРК`, the end of the whole root, is
+   the root length in a stored record.
 2. Pass 1 collects the export tables of all modules. The main module is
    read in place. The others are read from 067 into the buffer: the
    first zone, and then as many more as the header of the module needs.
@@ -644,12 +656,17 @@ page 0 is read and before the jump. Every word that
 | `zl1` | `ГЛАВ(ПЕЧ)` | «ПРИВЕТ ВСЕМУ», «ПОКАЖИ ЛЮДЯМ» ×2 | 17 words, equal |
 | `zl2` | `ГЛАВ(Л.ПЕЧ/Л.ПЕЧБ)` | the same: segment 1 at 02000 | 17 words, equal |
 | `zl3` | `ГЛАВ(ПЕЧ+НЕТУ)` | «ЗАГР: НЕТ МОДУЛЯ  НЕТУ» | — |
-| `zl4` | `СЛОЖН(ПЕЧ)` | «ПРИВЕТ ВСЕМУ» | 22 words, equal |
+| `zl4` | `СЛОЖН(ПЕЧ)` | «ПРИВЕТ ВСЕМУ» | 23 words, equal |
 | `zl5` | `ГЛ5(Л.ВТОР/Л.ТРЕТ+ВТОР/ВТОР+ПЕРВ)` | — | 1113 words, equal |
 
 What the jobs cover:
 - `zl4` has kinds 1–4 in half-words, kinds 5 and 6 with and without
-  minus, and `Л;` records of kinds 1, 2, 5 and 6.
+  minus, and `Л;` records of kinds 1, 2, 5 and 6, with two adjacent
+  fields `КТ1(1)/14=КТ1/0`.
+  - **The bug it caught.** zagr built the field mask one bit too wide
+    (constant 057 instead of 060). Filling the lower field then cleared
+    the low bit of the upper one. This showed up in `ТОШПР`: 9 words
+    differed from `itmload`.
 - `zl5` builds three segments of up to 02130 words through the pager,
   across tract boundaries.
 
@@ -704,6 +721,32 @@ statement:
   label (`G04721(5)` for `G04721+5`), so ITM gives it the same
   relocation. Otherwise it is the octal number, negative when bit 19 of
   a short command is set.
+- **Labels in the BEMSH parts.** `tools/mkbe.py` writes an address of
+  another part as that part's label. Its notes list the parts with `USES`
+  and with `SEGREF`, and the label is declared with `внеш`. This covers
+  literals of any length and decimal numbers in commands that address
+  memory or jump (`'630'`, `пб 12`), and a label+N past the end of the
+  part (`G05777+37` is a label of `ФАЗ2Б`). An index offset below 0100
+  (`16(М3)`) stays a number.
+  - **Phase of a resident command.** For a command of the resident in
+    the overlay area, `SEGREF` in `notes/aitm0.py` and
+    `notes/aitm6.py` names the phase it runs in, with the reasons. So
+    `зп '5450'` in 0500 is `D05450` of `ФАЗ2А`.
+  - **Shared entries of the phases.** The resident code of several
+    phases uses some addresses, and each phase has its own code there:
+    05152 (`ФАЗ1А`, `ФАЗ2А`), 05437 (`ФАЗ2А`, `ФАЗ2В`), 06073 (`ФАЗ1Б`,
+    `ФАЗ2Б`) and 04127 (`ФАЗ1А`, `ФАЗ2А`).
+    - **Name.** The entry has the same name `Фааааа` in each of these
+      phases, and every one of them exports it. In BEMSH an entry name
+      may repeat in different modules.
+    - **Notes.** `SEGREF` lists those phases.
+    - **Linking.** `внеш` names the first phase. The loaders accept the
+      name from the root, since its address is the same in every
+      segment.
+  - **Extracodes.** Information-word addresses of extracodes 060–077
+    (`Э64`, `Э70`, `Э71`) count as addresses from 0100 on.
+  - **Left as numbers.** Addresses outside the parts stay numbers, and
+    so do the addresses behind `мода '10000'`.
 - **Data words** (`конд`, `текст`, `пам`) become `С;` with their 16
   octal digits.
 - **Text words.** A data word that the BEMSH comment marks as ITM text
@@ -716,22 +759,43 @@ statement:
   pairs give error 23. Such a word keeps the BEMSH comment as an ITM
   note (`3043731443546615,‘{ПОЗ}(ИСПР‘`). Of the 38 marked
   words, 29 are written as text.
+- **Packed addresses.** `ТОШПР` (aitm0 01566–01605) holds, for each
+  error code n, the address to continue from: word n/4, field n%4 from
+  the left, 12 bits each. BEMSH has no relocatable 12-bit constant, so
+  the part writes it as octal digits. In ITM it is an `Л;` word with a
+  `К` field per non-zero address:
+  `ККОНСТ/44=КG05244/30=КСТОП/14=КСТОП/0,`.
+  - **Addresses.** Those from 04000 are labels of `ФАЗ2А`, since these
+    are phase-2 errors, and they become external names. An address
+    without a label is `label(n)` (`КG04104(2)/0`).
+  - **Records.** The 56 fields give 56 field records (kinds 1, 5, 6)
+    and the name + offset record of `G04104(2)`: 071 reference records
+    of `АИТМ`.
+  - **Possible only with the split root.** With one root module
+    (1–06777) `ВЫВМ` lost the literals of these names.
 - **Block structure.** The outer block holds `Э;НАЗ:П=адрес,` and the
   external names (`X:Н=X,`) of the labels the part uses from other
   modules, as its `внеш` lines say. Everything else is in an inner block,
   and only the labels other modules use are marked `*`, so the export
-  tables hold 248 names, not every label.
+  tables hold 476 names, not every label.
 - **References between different overlay segments** are written as
   numbers, since the addresses are fixed: `ФАЗ2В` lies over the upper
   half of `ФАЗ2А` and refers to it and to `ФАЗ2Б`, which flat segments
   cannot express.
-- **The root module** `АИТМ` is `aitm0` and `aitm6` in one text, with
-  `НАЗ` = 1 and `Н;6407,` before `aitm6`. The part starts at 1, and the
-  module's first word is 010.
+- **The root** is two modules:
+  - the main module `АИТМ` (`aitm0`, `НАЗ` = 1: the part starts at 1,
+    and the module's first word is 010);
+  - `АИТМ6` (`aitm6`, `НАЗ` = 06400), a list module that the loaders
+    put in the root.
+
+  One module of 1–06777 (with the gap 02000–06377) would be too long
+  for `ВЫВМ`: the scale would cover its literals, and the root could
+  not use external names (section 8).
 
 | Module | Parts | НАЗ | Segment |
 |---|---|---|---|
-| `АИТМ` | `aitm0`, `aitm6` | 1 | root |
+| `АИТМ` | `aitm0` | 1 | root |
+| `АИТМ6` | `aitm6` | 06400 | root (list) |
 | `ФАЗ1А`, `ФАЗ1Б` | `f1a`, `f1b` | 04000, 06000 | 1 |
 | `ФАЗ2А`, `ФАЗ2Б` | `f2a`, `f2b` | 04000, 06000 | 2 |
 | `ФАЗ2В` | `f2c` | 05000 | 3 |
@@ -747,12 +811,13 @@ translator. It is what is left of the zone of the lost loader, which
 `ЗАВЕР` reads only to start the loader; here `zagr` takes its place. So
 `z14` is not rebuilt.
 
-**Chain.** The five phase modules are translated job after job onto one
-library: the first with key `РАНГК`, then `РАГК`. The last job
-translates `АИТМ` with key
-`РАГК,АИТМЗ:АИТМ(ФАЗ1А+ФАЗ1Б/ФАЗ2А+ФАЗ2Б/ФАЗ2В)!` on the copy of 2148
-with `zagr`, which links the modules and stores `АИТМЗ` (zones
-015–023).
+**Chain.** `АИТМ6` and the five phase modules are translated job after
+job onto one library: the first with key `РАНГК`, then `РАГК`. The last
+job translates `АИТМ` with key
+`РАГК,АИТМЗ:АИТМ(АИТМ6+ФАЗ1А+ФАЗ1Б/ФАЗ2А+ФАЗ2Б/ФАЗ2В)!` on the copy of
+2148 with `zagr`, which links the modules and stores `АИТМЗ` (from
+zone 013). The modules export 476 entries; with the `НАЗ` entries and
+`СЕГ1`–`СЕГ3`, 483 names.
 
 **Checks.**
 - `tools/itmcmp.py stored` takes the root and the three segments from the
@@ -767,8 +832,10 @@ with `zagr`, which links the modules and stores `АИТМЗ` (zones
 **What it took in the loaders:**
 - the `НАЗ` placement;
 - the stored root from address 0, for the words 1–7 of `aitm0`;
-- a larger name table in `zagr` (257 names: 248 entries, the `НАЗ` of
-  each module and `СЕГ1`–`СЕГ3`);
+- the name table of `zagr` in virtual memory (483 names; the table in
+  core held 333);
+- list modules with `НАЗ` in the root, so that the root is two short
+  modules;
 - segment 1 in its own virtual range when storing. Before that, `ФАЗ1А`
   and `ФАЗ1Б` overwrote the part of the root image that lies under them
   (02000–06377 between `aitm0` and `aitm6`), and the stored root

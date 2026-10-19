@@ -6,7 +6,11 @@ Usage: tools/be2itm.py > itm/NAME.itm ...   (see itm/Makefile)
 
 The text translates (key Р) into a library module whose image, linked by
 zagr or tools/itmload.py at its address (entry НАЗ), is the part word for
-word.  Several parts make one module (aitm0 aitm6 -> АИТМ, the root).
+word.  Several parts can make one module (Н; between them).  The root is
+АИТМ (aitm0, the main module) and АИТМ6 (aitm6, НАЗ 06400): a list
+module with НАЗ that overlaps no other group, which the loaders put in
+the root.  One root module of 1-06777 would be too long for ВЫВМ to keep
+its literals (AITM-object.md, section 8).
 
 Input: parts.txt (address, zones), parts/NAME.be (labels, operands),
 parts/NAME.be.lst (the BEMSH listing: address and half of every source
@@ -23,6 +27,10 @@ line) and parts/NAME.bin (the words).  Every word becomes one statement:
   on a card (not 040, 0140 КИ, 0142 ПОЗ, 0173 ПС: their glued ':' input
   is the terminal's, dispak decks have none); such a word stays in С;
   with the comment as an ITM note ‘...‘.
+- a table of packed 12-bit addresses (PACKED; BEMSH has no such
+  constant, the part writes its octal digits): Л; with a К field per
+  non-zero address, label(n) of the root or of ФАЗ2А, so the addresses
+  are relocated and linked like those of commands.
 Labels of the part stay on their words.  Labels other parts use are
 marked * (entries, exported with key Г from the inner block).  Labels of
 other parts become external names (Э; X:Н=X) - except between different
@@ -42,11 +50,11 @@ for l in open('parts.txt', encoding='utf-8'):
     PARTS[n] = (mod, int(a, 8), size)
 
 # Modules of the linked translator and their overlay segment (0 = root)
-MODULE = {'aitm0': 'АИТМ', 'aitm6': 'АИТМ', 'f1a': 'ФАЗ1А', 'f1b': 'ФАЗ1Б',
+MODULE = {'aitm0': 'АИТМ', 'aitm6': 'АИТМ6', 'f1a': 'ФАЗ1А', 'f1b': 'ФАЗ1Б',
           'f2a': 'ФАЗ2А', 'f2b': 'ФАЗ2Б', 'f2c': 'ФАЗ2В'}
 # z14 (0414.3) is not part of the translator: the leftover of the loader's
 # zone, which zagr replaces
-SEG = {'АИТМ': 0, 'ФАЗ1А': 1, 'ФАЗ1Б': 1, 'ФАЗ2А': 2, 'ФАЗ2Б': 2,
+SEG = {'АИТМ': 0, 'АИТМ6': 0, 'ФАЗ1А': 1, 'ФАЗ1Б': 1, 'ФАЗ2А': 2, 'ФАЗ2Б': 2,
        'ФАЗ2В': 3}
 
 SHORT = {0o00: 'ЗП', 0o01: 'ЗМ', 0o03: 'СМ', 0o04: 'АС', 0o05: 'АВ', 0o06: 'ОВ',
@@ -58,6 +66,11 @@ SHORT = {0o00: 'ЗП', 0o01: 'ЗМ', 0o03: 'СМ', 0o04: 'АС', 0o05: 'АВ', 0
 LONG = {0o22: 'ИА', 0o23: 'ИК', 0o24: 'ПА', 0o25: 'СА', 0o26: 'У0', 0o27: 'У1',
         0o30: 'ПБ', 0o31: 'ПВ', 0o34: 'И0', 0o35: 'И1', 0o37: 'КЦ'}
 DATA = {'конд', 'текст', 'пам'}
+# Tables of four 12-bit addresses a word: part -> (first, last + 1).
+# ТОШПР, the continuation after error code n (word n/4, field n%4 from
+# the left); the addresses from 04000 are in ФАЗ2А, whose errors these are
+PACKED = {'aitm0': (0o1566, 0o1606)}
+FIELDS = (0o44, 0o30, 0o14, 0)              # /M of the К fields
 # ITM codes of the characters an А; constant may hold: letters, digits,
 # space (017) and a few signs, from itm-encoding.txt
 TEXT = {}
@@ -100,7 +113,8 @@ def layout(name):
     for l in open('parts/%s.be.lst' % name, encoding='utf-8'):
         a, code, n = l[25:30], l[31:48], l[55:59]
         if len(l) < 31 or l[24] != ' ' or not re.fullmatch(r'[0-7]{5}| {5}', a) \
-                or not code.strip() and not a.strip():
+                or not code.strip() and not a.strip() \
+                or not re.fullmatch(r'[ 0-7]*', code.rstrip('\n')):
             continue                    # comments, pseudo-operations, headers
         n = int(n) if n.strip().isdigit() else None
         f = src[n - 1].split('\t') if n else ['', '', '']
@@ -161,8 +175,25 @@ def main():
         if x in ext:
             return ext[x], lays[ext[x]][1][x]
         return None
+    def packed(p, w):
+        """[(field, part, label, offset)] of a packed address word."""
+        fs = []
+        for m in FIELDS:
+            v = w >> m & 0o7777
+            if v:
+                q = 'f2a' if v >= 0o4000 else p
+                a, x = max((a, x) for x, a in lays[q][1].items() if a <= v)
+                fs.append((m, q, x, v - a))
+        return fs
     # names every part uses from other modules, and the entries they need
     used, exported = {}, set()
+    for p, (f, l) in PACKED.items():
+        ws = words(p)
+        for a in range(f, l):
+            for m, q, x, off in packed(p, ws[a - PARTS[p][1]]):
+                if q != p:
+                    used.setdefault(p, set()).add(x)
+                    exported.add((q, x))
     for p, (lay, labels, src, ext) in lays.items():
         for a, w in lay.items():
             for n in ([w[1]] if isinstance(w, tuple) else w):
@@ -175,6 +206,15 @@ def main():
                     if so == 0 or sp == 0 or so == sp:
                         used.setdefault(p, set()).add(x)
                         exported.add((o[0], x))
+    # a shared entry of phases (a list in SEGREF of tools/mkbe.py notes):
+    # the same label at the same address, every part of the list exports it
+    from mkbe import load_notes
+    for p in lays:
+        for a, u in load_notes(p).get('SEGREF', {}).items():
+            if isinstance(u, list):
+                for q in u:
+                    exported.add((q, next(x for x, v in lays[q][1].items()
+                                          if v == int(a, 8))))
     base = PARTS[parts[0]][1] or 1          # aitm0: word 0 is not loaded
     externals = sorted({x for p in parts for x in used.get(p, ())})
     body = ['В;', 'Э;НАЗ:П=%o,' % base]
@@ -197,6 +237,14 @@ def main():
             lab = at.get(a)
             lab = (('*' if (p, lab) in exported else '') + lab + ':') if lab else ''
             entry = lay.get(a)
+            if p in PACKED and PACKED[p][0] <= a < PACKED[p][1]:
+                if section != 'Л':
+                    body.append('Л;')
+                    section = 'Л'
+                body.append('%s%s,' % (lab, '='.join(
+                    'К%s%s/%o' % (x, '(%o)' % off if off else '', m)
+                    for m, q, x, off in packed(p, w))))
+                continue
             if entry is None or isinstance(entry, tuple):
                 n = entry and entry[1]
                 t = n and "ITM '" in src[n - 1] and text(w)

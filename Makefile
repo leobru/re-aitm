@@ -176,10 +176,10 @@ traces/zs1.run: traces/zs1.zscmp
 # itm/*.itm; нужны parts/*.be.lst и parts/*.bin - make parts check),
 # транслируются самим АИТМ в библиотеку, zagr связывает и записывает их
 # (АИТМЗ); traces/dog/cmp.txt - сверка записи с частями и с itmload
-ITMPARTS := f1a f1b f2a f2b f2c
+ITMPARTS := aitm6 f1a f1b f2a f2b f2c
 itm: itm/aitm.itm $(addprefix itm/,$(addsuffix .itm,$(ITMPARTS)))
-itm/aitm.itm: parts/aitm0.be parts/aitm6.be tools/be2itm.py
-	tools/be2itm.py aitm0 aitm6 -o $@
+itm/aitm.itm: parts/aitm0.be tools/be2itm.py
+	tools/be2itm.py aitm0 -o $@
 itm/%.itm: parts/%.be tools/be2itm.py
 	tools/be2itm.py $* -o $@
 dogfood: itm traces/zagr.2148 traces/z14mock.2148
