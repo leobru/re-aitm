@@ -184,6 +184,10 @@ itm/%.itm: parts/%.be tools/be2itm.py
 	tools/be2itm.py $* -o $@
 dogfood: itm traces/zagr.2148 traces/z14mock.2148
 	tools/dogfood.sh
+# Нагрузка на zagr: 1400 имен, модуль длиннее 4 зон (tools/zstress.sh,
+# traces/zst/cmp.txt)
+zstress: traces/zagr.2148 traces/z14mock.2148
+	tools/zstress.sh
 
 # Зона 0414 (связывающий загрузчик) с пробой (tools/mkz14.py) на копии 2148:
 # lib6 (с А) и lib6n (без А) на томе lib5; проба читает входы загрузчика
@@ -214,4 +218,4 @@ check:
 clean:
 	rm -f 2222 parts/*.new parts/*.b6 parts/*.lst
 
-.PHONY: all zones traces parts be check clean link zagr itm dogfood
+.PHONY: all zones traces parts be check clean link zagr itm dogfood zstress

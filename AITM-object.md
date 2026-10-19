@@ -525,11 +525,16 @@ page 0, where it is read:
 | 02000–03777 | pager windows |
 | 04000–05777 | key block, then the 067 catalogue |
 | 06000 | list; 06100–06477 module table (8 words per module; word 3 is the alignment mask, or the address with bit 16 for `НАЗ`) |
+| 06500–06642 | variables, cleared at the start (only `ИНФ` and `ПУСКА`, needed after pages 1 … L are read, stay in page 0) |
+| 07000–07377 | buffer of the name table |
+| 07400–07777 | sector buffer of the record being stored |
 | 010000–010377 | zeros for filling the image |
 | 014000 … | the main module |
-| 030000–047777 | buffer for one library module (4 zones) |
-| 050000–051764 | names (3 words each, about 338) |
+| 030000–051774 | buffer for one library module (up to 9 zones) |
 | 051775–051777 | the starting stub |
+
+The code ends at 01632. `zagr/Makefile` fails the build when it would
+not fit in the zone.
 
 **Building through the pager.**
 - **Virtual memory.** The image is built in virtual memory on drums
@@ -551,11 +556,21 @@ page 0, where it is read:
 - **Zero filling.** A tract touched for the first time is written from
   core page 0 (VM.md), so the loader first fills the run image with
   zeros.
+- **The name table** is in virtual memory too, at v000000–v037777: the
+  translator's data there (scale, literals, references, the key block)
+  is no longer needed once the loader has read the key block with Э70.
+  - **Entry layout.** An entry is 2 words: the name, and segment << 15 |
+    address.
+  - **Reading.** Searches read the table into the buffer at 07000 by
+    0400 words at a time, through the pager.
+  - **Size.** It holds 8192 names. Beyond v037777 lies the direct range,
+    that is core 010000–027777 and the main module.
 
 **Steps.**
 1. Lay out the modules as in section 7.
 2. Pass 1 collects the export tables of all modules. The main module is
-   read in place; the others are read from 067 into the buffer.
+   read in place. The others are read from 067 into the buffer: the
+   first zone, and then as many more as the header of the module needs.
 3. Pass 2 relocates each module in place, by its scale and `Л;`
    records, and writes it to its virtual range. Every segment is
    linked, not only segment 1.
@@ -576,8 +591,9 @@ page 0, where it is read:
      (−1), and the record goes to the free zone.
 
    After pass 2 the loader writes, by sector exchanges on unit 067:
-   - the record, built at 030000: header, root (read back from virtual
-     memory), root exports;
+   - the record, as a stream through the sector buffer: header, root
+     (read back from virtual memory), root exports, zeros to the end of
+     the last sector;
    - every segment, read sector by sector from its virtual range;
    - zero sectors up to the end of the zone, so that no filler of the
      fresh zone is left. They are not counted in the length;
@@ -593,9 +609,21 @@ page 0, where it is read:
    - РАЗНЫЙ АДР.;
    - КОРОТК. АДР.;
    - МНОГО ПАМЯТИ: more than 7 segments, more than 31 list modules, the
-     run image past 050000, or the name table full;
-   - БОЛЬШОЙ МОД.: a library module longer than 4 zones, or the main
-     module past 030000.
+     run image past 050000, more than 8192 names, or more than 07777
+     words of root exports in a stored record (the field in word 1);
+   - БОЛЬШОЙ МОД.: a library module longer than 9 zones (past 051774), or
+     the main module past 030000.
+
+The number of external names and references is otherwise not limited by
+the loader. The translator has limits of its own [опыт]:
+- `ВЫВМ` builds the export table at 010000 and the module at 014000.
+  When the export table grows past 014000, the two overlap and the
+  export table comes out spoiled: 900 entry names come out right, 1500
+  do not.
+- The literals wait at 023000 while the image and the scale are copied
+  over them. An image of 05771 words keeps them; with one of 06371
+  words, all the literals (the external names) of the module are lost. This applies to
+  the root of АИТМ (1–06777), so it cannot use external names.
 
 The program must end below 050000, because page 024 holds the stub and
 the jobs order `ЛИСТ 0-24`.
@@ -635,6 +663,19 @@ as the translator left it, by the same job run with the probe of zone
 |---|---|---|
 | `zs1` | `ПРОГ:ГЛАВ2(Л.ПЕЧ/Л.ПЕЧБ)` | «ЗАГР: ЗАПИСАНО    ПРОГ»; 6 zones equal. `itmload 'ПРОГ!'` runs it: «ПРИВЕТ ВСЕМУ», then segment 2 read by `СЕГ2`: «ЗДРАВСТВУЙТЕ» |
 | `zs2` | `ПРГ5:ГЛ5(Л.ВТОР/Л.ТРЕТ+ВТОР/ВТОР+ПЕРВ)` | 3 segments, zones 6–11; 10 zones equal |
+
+**Load test** (`make zstress`, `tools/zstress.sh`; texts from
+`tools/zstress.py`). The library has two modules: `СА` with 900 entries
+and an image to 04000 (5 zones), and `СБ` with 300 entries. Both use 100
+root names, some with offsets, and both have an entry `ОБЩ`. The main
+module `ГЛС` has 200 entries and uses `СА0`, `СБ0`. That makes 1400
+names; the old table in core held 333.
+
+| Key | Result |
+|---|---|
+| `ГЛС(СА/СБ)` | memory before the start equals itmload: 2243 words |
+| `ЗСТ:ГЛС(СА/СБ)` | «ЗАГР: ЗАПИСАНО    ЗСТ»; 13 zones equal to `itmload --store` |
+| `НЕТ(СА)` | «ЗАГР: НЕТ ИМЕНИ   НЕТУ» |
 
 All results are [опыт].
 
