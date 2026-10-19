@@ -270,7 +270,7 @@ a delimiter [трасса for `!`, `+`, `(`; код for the rest]:
 | `+` | the name is appended to the list at 010005 + 06470 (06470 counts) |
 | `(` | the name becomes the module name (06501), and `КОНЗАД` := 0. A second `(` overwrites 06501, and that name is not listed: `ГЛАВ(ПЕРВ+ВТОР(ТРЕТ+ЧЕТВ))` gives main `ВТОР`, list `ПЕРВ ТРЕТ ЧЕТВ 0 0`, no error [трасса] |
 | `)` | the name goes to the list, and the next slot is set to 0, which ends the list [трасса] |
-| `:` | the name goes to 010003 |
+| `:` | the name goes to 010003. The loaders `zagr/` and `tools/itmload.py` take it as the name to store the linked program under instead of starting it (AITM-object.md, section 8) |
 | `-` | the name goes to 010004 |
 | `,` | the name goes to 010000 |
 | `/` | a control word `0020000000000000` goes to the list, then the name: `ВТОР/ТРЕТ` gives `0020000000000000 ВТОР ТРЕТ` [трасса] |
@@ -512,8 +512,10 @@ Makefile drops `lib6`'s 0414 coverage, which is not code.
 
 A host-side implementation of these steps, with the conventions it
 chooses, is `tools/itmload.py` ([AITM-object.md](AITM-object.md),
-section 7). A BEMSH program with the same run mode, for zone 0414, is in
-`zagr/` (section 8).
+section 7). A BEMSH program with the same functions, for zone 0414, is
+in `zagr/` (section 8). Both place a module with an entry `НАЗ` (kind 0)
+at that address. That is how the translator itself is rebuilt from its
+parts rewritten in ITM (section 9).
 
 What the missing program in drum 21 zone 014 receives from the
 translator, and what it must do. [вывод] marks what follows from the
@@ -558,7 +560,7 @@ with `А` [трасса z14p, z14pn].
 | М13 | 6 + the number of `+` names: length of the block from 010000 | [трасса] |
 | 010000 | name after `,` in the key | purpose unknown |
 | 010001, 010002 | address range as ITM text, defaults `+00010` and `+70000` (octal 010 and 070000); a number in the key replaces them | [трасса] for the defaults |
-| 010003 | name after `:` | purpose unknown |
+| 010003 | name after `:` | purpose unknown; `zagr/` stores the linked program under it |
 | 010004 | name after `-` | purpose unknown |
 | 010005 … 010000 + М13 − 1 | the `+` list: modules to link to the main one | [трасса] |
 | 06501 | name of the main module (the one before `(`) | [трасса] |

@@ -349,7 +349,7 @@ Conventions (not recorded in the module, chosen for the script):
 
 | Question | Choice |
 |---|---|
-| placement | the main module at 010 (as translated), the others after it in the order of the list |
+| placement | the main module at 010 (as translated), the others after it in the order of the list. A module with an entry `НАЗ` of kind 0 (`Э;НАЗ:П=4000,`) goes to that address instead (shift = НАЗ − 010; `НАЗ` = 1 puts the main module at 1). A segment then spans from its lowest module start to its highest end |
 | `Р` areas | each module gets its own zeroed area after all the images, of the size in its catalogue descriptor; `--common` gives one area of the largest size to all |
 | start | the main module's entry `НАЧ` (kind 1) if exported, else 010 |
 | names | from the export tables of all loaded modules (kinds 0–4); a module needs option `Г` to be called. On a repeated name, the first one wins |
@@ -429,9 +429,9 @@ record itself:
 
 | Words | Contents |
 |---|---|
-| 0 | root length (from 010, table included) << 33 \| segments << 22 |
+| 0 | root length (from address 0, table included) << 33 \| segments << 22 |
 | 1 | export words << 36 \| table address << 15 \| start |
-| 2 … | root image, already linked |
+| 2 … | root image from address 0, already linked (cell 0 is not loaded) |
 | then | exports: (name, address) of the root, `СЕГn` included |
 | from the next sector | the segments, sector after sector, as the table reads them |
 
@@ -486,11 +486,20 @@ allowed.
 
 ## 8. Loader in BEMSH for zone 0414 (`zagr/`)
 
-`zagr/parts/zagr.be` is a BEMSH program with the run mode of
+`zagr/parts/zagr.be` is a BEMSH program with the functions of
 `tools/itmload.py`. It links the main module and the list, resolves
-external names, handles overlays and starts the program. It lies in
-zone 0414 of a copy of 2148, where `ЗАВЕР` expects the lost loader.
-Storing a linked program in the library is not implemented yet.
+external names and handles overlays. Then it either starts the program
+or stores it in the library in the format of `--store` (section 7). It
+lies in zone 0414 of a copy of 2148, where `ЗАВЕР` expects the lost
+loader.
+
+**Run or store.** A name before `:` in the key,
+`РАГК,ПРОГ:ГЛАВ2(Л.ПЕЧ/Л.ПЕЧБ)!`, asks the loader to store the linked
+program under that name instead of starting it. The translator puts
+that name in word 3 of the key block (010003; LIBRARY.md, «Key Р»), and
+the loader reads it from 05003 before it reads the catalogue.
+`tools/itmload.py` accepts the same key and then wants `--store ИМЯ
+OUT.vol`.
 
 Build and tests:
 
@@ -515,10 +524,11 @@ page 0, where it is read:
 | 0–01777 | the loader: a copy of the pager plus its own code and data |
 | 02000–03777 | pager windows |
 | 04000–05777 | key block, then the 067 catalogue |
-| 06000 | list; 06100 module table (8 words per module); 06500–07774 names (3 words each) |
+| 06000 | list; 06100–06477 module table (8 words per module; word 3 is the alignment mask, or the address with bit 16 for `НАЗ`) |
 | 010000–010377 | zeros for filling the image |
 | 014000 … | the main module |
 | 030000–047777 | buffer for one library module (4 zones) |
+| 050000–051764 | names (3 words each, about 338) |
 | 051775–051777 | the starting stub |
 
 **Building through the pager.**
@@ -527,7 +537,10 @@ page 0, where it is read:
   - the root and segment 1 go to v060000 + address, as the translator
     lays out a program;
   - segment s ≥ 2 goes to v160000 + (s − 2)·0100000 + address, which
-    limits the list to 7 segments.
+    limits the list to 7 segments;
+  - when storing, segment 1 gets its own range too (as segment 2 does,
+    the others shift by one, so at most 6 segments), so that a segment
+    overlapping the root's addresses does not overwrite the root image.
 - **A copy of the pager.** The pager `ОБМЕН`/`ЛСТБАР` lives in the
   resident page 0, which zone 0414 replaces, so the loader carries a
   copy of it at the same addresses 00014–00160. It has to stay there:
@@ -552,7 +565,27 @@ page 0, where it is read:
      Э70;
    - copy a 3-word stub to 051775. With the information word in 051777,
      the stub reads page 0 (tract 030) and jumps to `НАЧ` or 010.
-5. Errors are printed by Э64 as «ЗАГР: …» followed by a name, and the job
+5. **Storing** (name before `:`). The layout follows section 7:
+   - the first module of every segment goes to an абзац boundary;
+   - the `Р` areas start on an абзац;
+   - the root gets the table of Э70 words, one per sector of each
+     segment, ended by 0. The layout is repeated until the size of the
+     table settles;
+   - the names `СЕГ1`, `СЕГ2`, … are entered before pass 1;
+   - the catalogue entry of the old program with that name is freed
+     (−1), and the record goes to the free zone.
+
+   After pass 2 the loader writes, by sector exchanges on unit 067:
+   - the record, built at 030000: header, root (read back from virtual
+     memory), root exports;
+   - every segment, read sector by sector from its virtual range;
+   - zero sectors up to the end of the zone, so that no filler of the
+     fresh zone is left. They are not counted in the length;
+   - the catalogue (zone 0).
+
+   It prints «ЗАГР: ЗАПИСАНО ИМЯ» and ends with Э74. The sector form of
+   Э70 reaches zones 0–037 only.
+6. Errors are printed by Э64 as «ЗАГР: …» followed by a name, and the job
    ends with Э74. The cases are:
    - НЕТ МОДУЛЯ;
    - НЕТ ИМЕНИ;
@@ -592,4 +625,101 @@ What the jobs cover:
 - `zl5` builds three segments of up to 02130 words through the pager,
   across tract boundaries.
 
+Storing is checked by `traces/zsN.zscmp` (`tools/volcmp.py`). The
+volume after the job is compared word for word with the one
+`tools/itmload.py --store` writes. The reference is made on the volume
+as the translator left it, by the same job run with the probe of zone
+0414 (`traces/z14mock.2148`):
+
+| Job | Key | Result |
+|---|---|---|
+| `zs1` | `ПРОГ:ГЛАВ2(Л.ПЕЧ/Л.ПЕЧБ)` | «ЗАГР: ЗАПИСАНО    ПРОГ»; 6 zones equal. `itmload 'ПРОГ!'` runs it: «ПРИВЕТ ВСЕМУ», then segment 2 read by `СЕГ2`: «ЗДРАВСТВУЙТЕ» |
+| `zs2` | `ПРГ5:ГЛ5(Л.ВТОР/Л.ТРЕТ+ВТОР/ВТОР+ПЕРВ)` | 3 segments, zones 6–11; 10 zones equal |
+
 All results are [опыт].
+
+## 9. Dogfooding: АИТМ rebuilt with its own tools
+
+The translator itself is the test program. Its parts (`parts/*.be`,
+which BEMSH reassembles byte for byte, README.md) are rewritten in ITM
+autocode, translated by АИТМ 2148 into the module library, linked by
+`zagr` with overlays and stored. The stored program matches the
+original zones of 2148 [опыт]:
+
+```
+make parts check        # parts/*.bin, parts/*.be.lst
+make itm                # itm/*.itm from parts/*.be (tools/be2itm.py)
+make dogfood            # tools/dogfood.sh -> traces/dog/cmp.txt
+```
+
+**Rewriting** (`tools/be2itm.py`). Every word of a part becomes one
+statement:
+- **Command words** (also `кк`, `дк` and `конк` halves) become `К;`.
+  Each half is decoded from the binary: index register, ITM mnemonic or
+  `Эnnn`/`Эnn` for codes without one, and the address. A numeric
+  address after `Э` is written with `+` (`Э070+1065`): digits right after
+  the code would be read as part of it.
+- **Addresses.** An address is symbolic when the BEMSH operand names a
+  label (`G04721(5)` for `G04721+5`), so ITM gives it the same
+  relocation. Otherwise it is the octal number, negative when bit 19 of
+  a short command is set.
+- **Data words** (`конд`, `текст`, `пам`) become `С;` with their 16
+  octal digits.
+- **Block structure.** The outer block holds `Э;НАЗ:П=адрес,` and the
+  external names (`X:Н=X,`) of the labels the part uses from other
+  modules, as its `внеш` lines say. Everything else is in an inner block,
+  and only the labels other modules use are marked `*`, so the export
+  tables hold 248 names, not every label.
+- **References between different overlay segments** are written as
+  numbers, since the addresses are fixed: `ФАЗ2В` lies over the upper
+  half of `ФАЗ2А` and refers to it and to `ФАЗ2Б`, which flat segments
+  cannot express.
+- **The root module** `АИТМ` is `aitm0` and `aitm6` in one text, with
+  `НАЗ` = 1 and `Н;6407,` before `aitm6`. The part starts at 1, and the
+  module's first word is 010.
+
+| Module | Parts | НАЗ | Segment |
+|---|---|---|---|
+| `АИТМ` | `aitm0`, `aitm6` | 1 | root |
+| `ФАЗ1А`, `ФАЗ1Б` | `f1a`, `f1b` | 04000, 06000 | 1 |
+| `ФАЗ2А`, `ФАЗ2Б` | `f2a`, `f2b` | 04000, 06000 | 2 |
+| `ФАЗ2В` | `f2c` | 05000 | 3 |
+
+**Long texts.** Each module is one job (`tools/itmdeck.py`); `f1a` is
+24 468 characters. The deck puts the text at 07000 and 06776 + N
+(N words) into cell 3; the loader of the deck passes it on in the
+accumulator. `ПУСК1` then goes to 04667, which copies the N words to
+the drum itself (`ТЕКСТП`; README.md). Earlier this was taken for data.
+
+The sector 0414.3 (`z14` in `parts.txt`) is not part of the
+translator. It is what is left of the zone of the lost loader, which
+`ЗАВЕР` reads only to start the loader; here `zagr` takes its place. So
+`z14` is not rebuilt.
+
+**Chain.** The five phase modules are translated job after job onto one
+library: the first with key `РАНГК`, then `РАГК`. The last job
+translates `АИТМ` with key
+`РАГК,АИТМЗ:АИТМ(ФАЗ1А+ФАЗ1Б/ФАЗ2А+ФАЗ2Б/ФАЗ2В)!` on the copy of 2148
+with `zagr`, which links the modules and stores `АИТМЗ` (zones
+015–023).
+
+**Checks.**
+- `tools/itmcmp.py stored` takes the root and the three segments from the
+  record through its Э70 words and compares them with `parts/*.bin`. All
+  seven parts match word for word: `aitm0` 1–01777, `aitm6`, `f1a`,
+  `f1b`, `f2a`, `f2b` and `f2c`.
+- `tools/volcmp.py` finds the volume identical to the one
+  `tools/itmload.py --store` writes from the same library.
+- Each module alone, placed at its `НАЗ`, also matches its parts
+  (`tools/itmcmp.py module`).
+
+**What it took in the loaders:**
+- the `НАЗ` placement;
+- the stored root from address 0, for the words 1–7 of `aitm0`;
+- a larger name table in `zagr` (257 names: 248 entries, the `НАЗ` of
+  each module and `СЕГ1`–`СЕГ3`);
+- segment 1 in its own virtual range when storing. Before that, `ФАЗ1А`
+  and `ФАЗ1Б` overwrote the part of the root image that lies under them
+  (02000–06377 between `aitm0` and `aitm6`), and the stored root
+  differed from `itmload`'s.
+

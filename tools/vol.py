@@ -86,7 +86,8 @@ def program(zs, z0):
     print('  stored program %016o %016o: root %o, segments %o, table %05o, start %05o'
           % (w[0], w[1], n, nseg, tab, start))
     for i, x in enumerate(w[2:2 + n]):
-        print('    %05o  %016o%s' % (0o10 + i, x, '  Э70' if 0o10 + i >= tab and x else ''))
+        if i >= 0o10 or x:
+            print('    %05o  %016o%s' % (i, x, '  Э70' if i >= tab and x else ''))
     for i in range(2 + n, 2 + n + nexp, 2):
         print('    export %-6s %016o' % (itm(w[i]), w[i + 1]))
 

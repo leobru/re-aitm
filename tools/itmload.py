@@ -10,8 +10,10 @@ module library, places them, relocates and links them, and starts the
 program, or stores the linked program in the library.  Format of the
 modules and conventions of the loader - AITM-object.md, section 7.
 
-  key     key Р of the translator: letters, ',', main name, '(' list of
-          names separated by '+', ')'.  'ИМЯ!' without a list loads one
+  key     key Р of the translator: letters, ',', [ИМЯ:] main name, '('
+          list of names separated by '+', ')'.  'ИМЯ:' asks to store the
+          program under ИМЯ (the convention of the BEMSH loader, zagr/);
+          the script then wants --store ИМЯ OUT.vol.  'ИМЯ!' without a list loads one
           module, or a program stored by --store.  Overlays: '/' after a
           name ends a segment, so 'ГЛАВ(ПЕРВ+ВТОР/ТРЕТ)' is the root ГЛАВ
           and the segments ПЕРВ+ВТОР and ТРЕТ, both from the end of
@@ -76,14 +78,14 @@ ALIGN = {'А': SECTOR, 'Л': 0o2000}     # абзац, лист
 
 
 def parse_key(key):
-    """Main module name and the segments of the list from a key Р:
-    each segment is a list of (name, alignment)."""
+    """Main module name, the segments of the list (each a list of (name,
+    alignment)) and the name before ':' (store under it) from a key Р."""
     key = key.strip().rstrip('!')
-    m = re.fullmatch(r'(?:Р?[^,(]*,)?\s*([^,(+/.)]+?)\s*(?:\((.*)\))?\s*', key)
+    m = re.fullmatch(r'(?:Р?[^,(]*,)?\s*(?:([^,(:]+?)\s*:)?\s*([^,(:+/.)]+?)\s*(?:\((.*)\))?\s*', key)
     if not m:
         raise LoadError('не разобрать ключ: %s' % key)
     segs, align = [[]], 1
-    body = m.group(2) or ''
+    body = m.group(3) or ''
     items = re.findall(r'\s*([^+/.)]*?)\s*([+/.)]|$)', body)
     for name, d in items:
         if not name and not d:
@@ -101,7 +103,7 @@ def parse_key(key):
             segs.append([])
     if not segs[-1] and len(segs) > 1:
         raise LoadError('сегмент без модулей: %s' % body)
-    return m.group(1), [s for s in segs if s]
+    return m.group(2), [s for s in segs if s], m.group(1)
 
 
 def library(spec):
@@ -133,6 +135,9 @@ class Module:
         self.rsize = (desc >> 20) & 0o7777
         self.base = self.delta = self.rbase = 0
         self.seg, self.align = 0, 1
+        # entry НАЗ of kind 0: the module goes to that address
+        self.naz = next((v & M15 for n, v in self.m['exports']
+                         if n == word('НАЗ') and v >> 45 == 0), None)
 
     def value(self, k, v):
         """Value of kind k (0-4) of this module, v as translated."""
@@ -141,7 +146,7 @@ class Module:
 
 
 def place(md, a):
-    a = -(-a // md.align) * md.align
+    a = md.naz if md.naz is not None else -(-a // md.align) * md.align
     md.base, md.delta = a, a - 0o10
     return a + len(md.image)
 
@@ -157,9 +162,9 @@ def layout(mods, common, table=0, rpad=1):
         for md in mods:
             if md.seg == seg:
                 e = place(md, e)
-        first = min(md.base for md in mods if md.seg == seg)
-        spans[seg] = (first, e)
-        a = max(a, e)
+        ms = [md for md in mods if md.seg == seg]
+        spans[seg] = (min(md.base for md in ms), max(md.base + len(md.image) for md in ms))
+        a = max(a, spans[seg][1])
     a = -(-a // rpad) * rpad
     if common:
         size = max(md.rsize for md in mods)
@@ -283,7 +288,7 @@ def write_program(path, out, z0, name, mods, spans, table, start, names):
     """Store the linked program in a copy of the volume path as out:
       word 0  root length << 33 | segments << 22
       word 1  export words << 36 | table address << 15 | start
-      root image (from 010, with the table of Э70 words), export table
+      root image (from address 0, with the table of Э70 words), export table
       (name, address) of the root names, then the segments, each from a
       sector boundary, as the table reads them.  Catalogue descriptor:
       bit 48 = 0 (a stored program), words << 32, first zone."""
@@ -319,21 +324,23 @@ def write_program(path, out, z0, name, mods, spans, table, start, names):
     tab = mods[0].base + len(mods[0].image)
     rootend = tab + len(table)
     exports = [(n, d[0][0]) for n, d in names.items() if 0 in d]
-    rec = [0, 0] + [core.get((0, a), 0) for a in range(0o10, rootend)]
+    rec = [0, 0] + [core.get((0, a), 0) for a in range(rootend)]
     for n, v in exports:
         rec += [n, v]
     sec = -(-len(rec) // SECTOR)
     t, data = [], {}
     for s in sorted(spans):
         a0, a1 = spans[s]
+        if a0 % SECTOR:
+            raise LoadError('сегмент %d начинается с %05o, не с границы абзаца' % (s, a0))
         for a in range(a0, a1, SECTOR):
             t.append(e70(a, z0 + first + sec // 4, sec % 4))
             data[sec] = [core.get((s, x), 0) for x in range(a, a + SECTOR)]
             sec += 1
         t.append(0)
     assert len(t) == len(table)
-    rec[2 + tab - 0o10:2 + rootend - 0o10] = t
-    rec[0] = (rootend - 0o10) << 33 | len(spans) << 22
+    rec[2 + tab:2 + rootend] = t
+    rec[0] = rootend << 33 | len(spans) << 22
     rec[1] = 2 * len(exports) << 36 | tab << 15 | start
     for j, w in enumerate(rec):
         put(z0 + first + j // 1024, j % 1024, w)
@@ -357,7 +364,7 @@ def read_program(zs, z0, desc):
     nexp, tab, start = w[1] >> 36, (w[1] >> 15) & M15, w[1] & M15
     root = w[2:2 + n]
     exports = [(w[i], w[i + 1]) for i in range(2 + n, 2 + n + nexp, 2)]
-    segs, j = [], tab - 0o10
+    segs, j = [], tab
     for _ in range(nseg):
         e = []
         while root[j]:
@@ -395,9 +402,9 @@ def run_stored(a, zs, z0, desc):
     """Job of a stored program: the root and segment --seg, read from the
     volume by its Э70 words; the volume is mounted as ЛЕНТ 67(--vol)."""
     root, start, tab, segs, exports = read_program(zs, z0, desc)
-    print('программа: корень 00010-%05o, пуск %05o, таблица сегментов %05o'
-          % (0o10 + len(root) - 1, start, tab))
-    blocks = [(0o10, root)]
+    print('программа: корень 00000-%05o, пуск %05o, таблица сегментов %05o'
+          % (len(root) - 1, start, tab))
+    blocks = [(1, root[1:])]                 # cell 0 is not loaded
     for s, e in enumerate(segs, 1):
         print('сегмент %d:' % s, ' '.join('%05o<-%o.%o' % unpack_e70(x) for x in e))
         if s == a.seg:
@@ -422,7 +429,10 @@ def main():
     ap.add_argument('--vol', default='2222')
     a = ap.parse_args()
     try:
-        main_name, segs = parse_key(a.key)
+        main_name, segs, store_name = parse_key(a.key)
+        if store_name and not a.store:
+            raise LoadError('ключ требует записи под именем %s: укажите --store %s OUT.vol'
+                            % (store_name, store_name))
         path, z0 = library(a.lib)
         zs = zones(path)
         cat = catalogue(zs, z0)

@@ -6,7 +6,7 @@ PARTS := $(shell grep -v '^\#' parts.txt | awk '{print $$1}')
 ZONES := $(shell grep -v '^\#' parts.txt | awk '{for (i = 4; i <= NF; i++) { sub(/\..*/, "", $$i); print $$i }}' | sort -u)
 LIBJOBS := lib1 lib2 lib3 lib4 lib5 lib6
 SBJOBS := sb1 sb2 sb3 sb4 sb5
-JOBS  := aitm w1 w2 w3 w5 keys macro macro2 macro3 macro4 corr corr1 corr2 corr3 corr4 corr5 corr6 corr7 corr8 dbg dbge dbgx errs sect hex lfld rnoa lname punch comm rerr bib tape flist fsb ext1 ext2 ext3 ext4 $(LIBJOBS) $(SBJOBS)
+JOBS  := aitm w1 w2 w3 w5 keys macro macro2 macro3 macro4 corr corr1 corr2 corr3 corr4 corr5 corr6 corr7 corr8 dbg dbge dbgx errs sect hex lfld rnoa lname punch comm rerr bib tape flist fsb ext1 ext2 ext3 ext4 txt48 $(LIBJOBS) $(SBJOBS)
 
 all: check
 
@@ -109,9 +109,10 @@ traces/link.txt: traces/link2.ev tools/itmload.py tools/vol.py
 # (traces/zagr.2148): задания zl1-zl5 переводят главный модуль с ключом
 # Р и списком, ЗАВЕР передаёт управление загрузчику. traces/zlN.txt -
 # печать, traces/zlN.zcmp - сверка памяти перед пуском с itmload
-# (tools/memcmp.py). zl3 - нет модуля в каталоге.
-ZLJOBS := zl1 zl2 zl3 zl4 zl5
-zagr: $(addprefix traces/,$(addsuffix .zcmp,$(ZLJOBS)))
+# (tools/memcmp.py). zl3 - нет модуля в каталоге, zl6 - главный модуль
+# с входом НАЗ (03000).
+ZLJOBS := zl1 zl2 zl3 zl4 zl5 zl6
+zagr: $(addprefix traces/,$(addsuffix .zcmp,$(ZLJOBS))) traces/zs1.zscmp traces/zs2.zscmp traces/zs1.run
 zagr/parts/zagr.new: zagr/parts/zagr.be
 	$(MAKE) -C zagr
 traces/zagr.2148: zagr/parts/zagr.new tools/mkz14.py
@@ -131,7 +132,10 @@ traces/zl4.txt: ZLTEXT = ПРИВЕТ ВСЕМУ
 traces/zl5.txt traces/zl5.zcmp: ZLVOL = traces/lib5.vol
 traces/zl5.txt traces/zl5.zcmp: ZLKEY = РАК,ГЛ5(Л.ВТОР/Л.ТРЕТ+ВТОР/ВТОР+ПЕРВ)!
 traces/zl5.txt: ZLTEXT = КОНЕЦ ЗАДАЧИ
-traces/zl1.txt traces/zl3.txt traces/zl4.txt: traces/link1.ev
+traces/zl6.txt traces/zl6.zcmp: ZLVOL = traces/link1.vol
+traces/zl6.txt traces/zl6.zcmp: ZLKEY = РАК,ГЛН(ПЕЧ)!
+traces/zl6.txt: ZLTEXT = ПОКАЖИ ЛЮДЯМ
+traces/zl1.txt traces/zl3.txt traces/zl4.txt traces/zl6.txt: traces/link1.ev
 traces/zl2.txt: traces/link3.ev
 traces/zl5.txt: traces/lib5.ev
 traces/zl%.txt: jobs/zl%.b6 traces/zagr.2148
@@ -142,6 +146,44 @@ traces/zl%.zcmp: traces/zl%.txt tools/itmload.py tools/memcmp.py
 	  tools/itmload.py '$(ZLKEY)' traces/zl$*.vol -o traces/zl$*.ref.b6 > /dev/null && \
 	  VOL2148=traces/zagr.2148 VOLIN=$(ZLVOL) tools/memcmp.py jobs/zl$*.b6 traces/zl$*.ref.b6 > $@; \
 	else echo 'без сверки' > $@; fi
+
+# Запись в библиотеку (имя перед : в ключе, 010003): zs1 - ПРОГ =
+# ГЛАВ2(Л.ПЕЧ/Л.ПЕЧБ), zs2 - три сегмента с ВТОР. Том после задания
+# (traces/zsN.vol) сравнивается пословно с записью itmload --store на
+# томе, где загрузчик не работал (проба z14mock): traces/zsN.zscmp.
+# traces/zs1.run - записанная программа: ПРИВЕТ ВСЕМУ, затем сегмент 2
+# по СЕГ2 - ЗДРАВСТВУЙТЕ
+traces/zs1.zscmp: ZSVOL = traces/link3.vol
+traces/zs1.zscmp: ZSKEY = РАК,ГЛАВ2(Л.ПЕЧ/Л.ПЕЧБ)!
+traces/zs1.zscmp: ZSNAME = ПРОГ
+traces/zs1.zscmp: traces/link3.ev
+traces/zs2.zscmp: ZSVOL = traces/lib5.vol
+traces/zs2.zscmp: ZSKEY = РАК,ГЛ5(Л.ВТОР/Л.ТРЕТ+ВТОР/ВТОР+ПЕРВ)!
+traces/zs2.zscmp: ZSNAME = ПРГ5
+traces/zs2.zscmp: traces/lib5.ev
+traces/zs%.zscmp: jobs/zs%.b6 traces/zagr.2148 traces/z14mock.2148 tools/itmload.py tools/volcmp.py
+	VOL2148=traces/zagr.2148 VOLIN=$(ZSVOL) VOLOUT=traces/zs$*.vol tools/trace.sh $< traces/zs$*.txt > /dev/null
+	grep -q 'ЗАГР: ЗАПИСАНО' traces/zs$*.txt
+	VOL2148=traces/z14mock.2148 VOLIN=$(ZSVOL) VOLOUT=traces/zs$*.pre tools/trace.sh $< > /dev/null
+	tools/itmload.py '$(ZSKEY)' traces/zs$*.pre --store $(ZSNAME) traces/zs$*.ref > /dev/null
+	tools/volcmp.py traces/zs$*.vol traces/zs$*.ref > $@
+traces/zs1.run: traces/zs1.zscmp
+	tools/itmload.py 'ПРОГ!' traces/zs1.vol -o traces/zs1run.b6 > /dev/null
+	cd traces && cp zs1.vol 2222 && timeout -s KILL 60 dispak --path=.:$${BESM6_PATH:-/usr/local/share/besm6} zs1run.b6 > zs1.run; rm -f 2222
+	grep -q 'ЗДРАВСТВУЙТЕ' $@
+
+# Dogfooding: части, переписанные на автокод ИТМ (tools/be2itm.py ->
+# itm/*.itm; нужны parts/*.be.lst и parts/*.bin - make parts check),
+# транслируются самим АИТМ в библиотеку, zagr связывает и записывает их
+# (АИТМЗ); traces/dog/cmp.txt - сверка записи с частями и с itmload
+ITMPARTS := f1a f1b f2a f2b f2c
+itm: itm/aitm.itm $(addprefix itm/,$(addsuffix .itm,$(ITMPARTS)))
+itm/aitm.itm: parts/aitm0.be parts/aitm6.be tools/be2itm.py
+	tools/be2itm.py aitm0 aitm6 -o $@
+itm/%.itm: parts/%.be tools/be2itm.py
+	tools/be2itm.py $* -o $@
+dogfood: itm traces/zagr.2148 traces/z14mock.2148
+	tools/dogfood.sh
 
 # Зона 0414 (связывающий загрузчик) с пробой (tools/mkz14.py) на копии 2148:
 # lib6 (с А) и lib6n (без А) на томе lib5; проба читает входы загрузчика
@@ -172,4 +214,4 @@ check:
 clean:
 	rm -f 2222 parts/*.new parts/*.b6 parts/*.lst
 
-.PHONY: all zones traces parts be check clean link zagr
+.PHONY: all zones traces parts be check clean link zagr itm dogfood
