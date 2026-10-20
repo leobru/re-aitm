@@ -137,7 +137,7 @@ in 14 words of zone 1 [опыт].
 ### Write path (`БИБЛ`, aitm0 01706/01710)
 
 1. Return unless the write bit is set and the selector matches М13;
-   from phase 1, also return if `D06666` (error in text) is set.
+   from phase 1, also return if `ПРОШ` (06666, error in text) is set.
 2. Catalogue via `БАРАБ`; message words `МЛ30`, `ЗАПИСЬ` or (when the
    read bit is also set) `ИЗМЕН.`.
 3. By name: `ИЩКАТ`. Found with ИЗМЕН. — rewrite in place if the new

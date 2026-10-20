@@ -36,6 +36,12 @@
 #            that the resident code of several phases uses is a list of
 #            parts ['f1a', 'f2a']: a shared entry, with the same name in
 #            NAMES of each, all of them export it, ВНЕШ names the first;
+#   GROUPS = ['06322-06341', ...]       words that belong together (a table,
+#            a message list): only the first word, named in NAMES, has a
+#            label and is exported; the others lose their labels and are
+#            addressed as ИМЯ+n in this part and in the parts that use them;
+#   ERRJUMP = ['01430']                 УИА X(Мr) right before ПБ to one of
+#            these addresses loads an error code: X is written as a number;
 #   NOTADDR = ['76001', ...]            literal values that are numbers (loop
 #            counters), not addresses in a part of USES: left as they are;
 #   TOP    = '''* ...'''                block comment after the СТАРТ lines;
@@ -433,6 +439,16 @@ def make(name):
     byaddr = {}
     for n, a in sorted(amap.items()):
         byaddr.setdefault(a, n)
+    # ERRJUMP = ['01430']: УИА X(Мr) just before ПБ to one of these
+    # addresses loads an error code, not an address: X is an octal number
+    errj = '|'.join(notes.get('ERRJUMP', []))
+    errcode = set()                 # source lines of such УИА
+    for i, l in enumerate(L[:-1]):
+        m = re.fullmatch(r'(\S*\tуиа\t)(?:[GD]([0-7]{5})([+-]\d+)?|(\d+))\((М\d+)\)', l)
+        if errj and m and re.fullmatch(r'\tпб\t[GD](%s)' % errj, L[i + 1]):
+            v = int(m.group(2), 8) + int(m.group(3) or 0) if m.group(2) else int(m.group(4))
+            L[i] = "%s'%o'(%s)" % (m.group(1), v, m.group(5))
+            errcode.add(i + 1)
     # Э66 with an address inside the part addresses its labelled word
     have = {l.split('\t')[0] for l in L}
     for i, l in enumerate(L):
@@ -545,7 +561,7 @@ def make(name):
     for i, l in enumerate(L, 1):
         f = l.split('\t')
         m = re.fullmatch(r"(?:'([0-7]+)'|(\d+))\((М\d+)\)", f[2]) if len(f) >= 3 and f[1] == 'уиа' else None
-        if not m or i in setbase:
+        if not m or i in setbase or i in errcode:
             continue
         t, r = int(m.group(1), 8) if m.group(1) else int(m.group(2)), m.group(3)
         tl = byaddr.get('%05o' % t)
@@ -1013,6 +1029,39 @@ def make(name):
                                      or pf[1] == 'кк' and re.match(r"'[0-7]+',", pf[2])):
             l = '\tдк\t0,0' + ('\t' + '\t'.join(f[3:]) if len(f) > 3 else '')
         out.append(l)
+    # GROUPS: the labels of the words after the first of a group (here and
+    # in the owners of the externals) become ИМЯ+n
+    grp = {}                        # label -> (name of the group, offset)
+    own = set()
+    for a, tok in [(a, names.get(a) or lab.get(a)) for a in names.keys() | lab.keys()] + \
+            [(a, t) for a, t in ext.items()]:
+        u = owner[a][1] if a in ext else name
+        for g in load_notes(u).get('GROUPS', []):
+            lo, hi = g.split('-')
+            if tok and re.fullmatch(r'[0-7]{5}', a) and lo < a <= hi:
+                grp[tok] = (load_notes(u)['NAMES'][lo], int(a, 8) - int(lo, 8))
+                if u == name:
+                    own.add(tok)
+
+    def grpsub(m):
+        g, o = grp[m.group(1)]
+        o += int(m.group(2) or 0)
+        return g + ('%+d' % o if o else '')
+    if grp:
+        tokre = re.compile(r'(?<![А-ЯA-Z0-9])(%s)([+-]\d+)?(?![А-ЯA-Z0-9])' %
+                           '|'.join(sorted(map(re.escape, grp), key=len, reverse=True)))
+        for k, l in enumerate(out):
+            f = l.split('\t')
+            if l.startswith('*') or len(f) < 2:
+                continue
+            if f[0] in own:
+                f[0] = ''
+            if len(f) >= 3 and f[1] not in ('конд', 'текст', 'пам'):
+                f[2] = tokre.sub(grpsub, f[2])
+            out[k] = '\t'.join(f)
+        for a in used_ext:
+            used_ext[a] = grp.get(used_ext[a], (used_ext[a],))[0]
+        expo = {a: grp.get(n, (n,))[0] for a, n in expo.items()}
     # externals and entries go after the СТАРТ/М header
     head = []
     imp = {}                        # owner -> names
