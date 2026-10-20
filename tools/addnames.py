@@ -8,8 +8,9 @@ Usage: tools/addnames.py [-e] PART < LIST
 
 LIST lines: 'ааааа ИМЯ комментарий'.  An existing entry of the address
 is replaced.  Checks that the name is a valid label (a letter, then up
-to 5 letters or digits) and that no other notes file nor another
-address uses it (shared phase entries Фааааа excepted).
+to 5 letters or digits) and that no other address uses it in any notes
+file (shared phase entries Фааааа excepted); the same name of the same
+address in several parts (EXTNAMES of a resident cell) is allowed.
 """
 import glob
 import re
@@ -35,7 +36,7 @@ def main():
         for a, n in re.findall(r"^ '([0-7]{5})': '([^']+)'", open(f, encoding='utf-8').read(), re.M):
             taken.setdefault(n, set()).add((f, a))
     for a, (n, c) in new.items():
-        other = {x for x in taken.get(n, set()) if x != (fn, a)}
+        other = {x for x in taken.get(n, set()) if x[1] != a}
         if other and not n.startswith('Ф'):
             sys.exit('%s: name taken by %s' % (n, sorted(other)))
     if key == 'EXTNAMES' and not re.search(r'^EXTNAMES = \{', text, re.M):

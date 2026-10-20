@@ -42,7 +42,11 @@
 #            addressed as ИМЯ+n in this part and in the parts that use them;
 #   EXTNAMES = {'04007': 'ВЛОЖ'}       own names of addresses of other parts
 #            (of USES or SEGREF), where the cell means here something else
-#            than in its owner or in other phases: ВНЕШ (ВЛОЖ,D04007);
+#            than in its owner or in other phases: ВНЕШ (ВЛОЖ,D04007).
+#            {'00631': {'*': 'СЛОВО', '04530-04535': 'ЗНЛИТ', ...}} - names
+#            in the commands of the address ranges (a working cell that
+#            each routine uses for its own); elsewhere the name of '*',
+#            without it the owner's;
 #   MASKNAMES = {'01546': 'Е3'}         a second name of a constant of this
 #            part (ИМЯ ЭКВ its name) for the commands И, ИЛИ, НТЖ that use
 #            it as a bit mask, in this part and in the parts that use it;
@@ -342,6 +346,10 @@ def ext_map(part, alias=True):
                 out[inv[x][0]] = (x, inv[x][1])
     if alias:
         for a, n in load_notes(part).get('EXTNAMES', {}).items():
+            if isinstance(n, dict):
+                if '*' not in n:
+                    continue
+                n = n['*']
             if a not in out:
                 sys.exit('%s: EXTNAMES %s %s: not an address of another part' % (part, a, n))
             out[a] = (n, out[a][1])
@@ -784,6 +792,10 @@ def make(name):
                 for a, n in inside:
                     del ekv_own['%05o' % a]
     used_ext = dict(litext)
+    rngnames = [(int(r.split('-')[0], 8), int(r.split('-')[-1], 8), a2, n)
+                for a2, v in notes.get('EXTNAMES', {}).items() if isinstance(v, dict)
+                for r, n in v.items() if r != '*']
+    rngused = {a2: set() for lo, hi, a2, n in rngnames}
 
     def final(a):                   # the label of an address of this part
         return names.get(a) or lab.get(a) or mods[name]
@@ -1015,6 +1027,15 @@ def make(name):
                    lambda m: names.get('%05o' % (int(m.group(1), 8) + int(m.group(2))),
                                        m.group(0)), l)
         l = subst(l)
+        if a and rngnames:          # EXTNAMES by ranges
+            f = l.split('\t')
+            for lo, hi, a2, n in rngnames:
+                if len(f) >= 3 and lo <= int(a[:5], 8) <= hi and a2 in ext and \
+                        f[1] not in ('внеш', 'вход'):
+                    f[2], k = re.subn(r'(?<![А-ЯA-Z0-9])%s(?![А-ЯA-Z0-9])' % ext[a2], n, f[2])
+                    if k:
+                        rngused[a2].add(n)
+            l = '\t'.join(f)
         if i in keep:               # a number stays a number
             l = keep[i]
         if i in literal:            # a number stays a number
@@ -1119,13 +1140,14 @@ def make(name):
             out[k] = '\t'.join(f)
             if mn[m.group(1)][1] != name:
                 mused.setdefault(mn[m.group(1)][1], set()).add(mn[m.group(1)][0])
-    if mused:                       # names left only in mask commands
+    if mused or rngnames:           # names left only in mask commands
         toks = set()
         for l in out:
             f = l.split('\t')
             if len(f) >= 3 and not l.startswith('*'):
                 toks.update(re.findall(r'[А-ЯA-Z][А-ЯA-Z0-9]*', f[2]))
-        used_ext = {a: n for a, n in used_ext.items() if n not in mn or n in toks}
+        used_ext = {a: n for a, n in used_ext.items()
+                    if n not in mn and a not in rngused or n in toks}
     own_masks = {n: names[a] for a, n in notes.get('MASKNAMES', {}).items()}
     if own_masks:
         fin = next(k for k, l in enumerate(out) if l.startswith('\tФИНИШ'))
@@ -1136,10 +1158,15 @@ def make(name):
     en = notes.get('EXTNAMES', {})
     real = ext_map(name, False) if en else {}
     for a2 in used_ext:
-        if a2 in en:
-            pairs.setdefault(owner[a2][1], set()).add('(%s,%s)' % (en[a2], real[a2][0]))
+        if a2 in en and isinstance(en[a2], dict) and '*' not in en[a2]:
+            imp.setdefault(owner[a2][1], set()).add(used_ext[a2])
+        elif a2 in en:
+            pairs.setdefault(owner[a2][1], set()).add('(%s,%s)' % (used_ext[a2], real[a2][0]))
         else:
             imp.setdefault(owner[a2][1], set()).add(used_ext[a2])
+    for a2, ns in rngused.items():
+        for n in ns:
+            pairs.setdefault(owner[a2][1], set()).add('(%s,%s)' % (n, real[a2][0]))
     for u, ns in mused.items():
         imp.setdefault(u, set()).update(ns)
     for u in sorted(imp.keys() | pairs.keys()):
