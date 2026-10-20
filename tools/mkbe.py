@@ -40,8 +40,12 @@
 #            a message list): only the first word, named in NAMES, has a
 #            label and is exported; the others lose their labels and are
 #            addressed as ИМЯ+n in this part and in the parts that use them;
-#   ERRJUMP = ['01430']                 УИА X(Мr) right before ПБ to one of
-#            these addresses loads an error code: X is written as a number;
+#   EXTNAMES = {'04007': 'ВЛОЖ'}       own names of addresses of other parts
+#            (of USES or SEGREF), where the cell means here something else
+#            than in its owner or in other phases: ВНЕШ (ВЛОЖ,D04007);
+#   ERRJUMP = ['01430']                 УИА X(Мr) right before ПБ, ПЕ or ПО
+#            to one of these addresses loads an error code: X is written
+#            as a number;
 #   NOTADDR = ['76001', ...]            literal values that are numbers (loop
 #            counters), not addresses in a part of USES: left as they are;
 #   TOP    = '''* ...'''                block comment after the СТАРТ lines;
@@ -285,10 +289,11 @@ def dis_labels(part):
     return res
 
 
-def ext_map(part):
+def ext_map(part, alias=True):
     """Literal addresses 'ааааа' of parts/PART.dis that fall into a part of
     USES (parts in memory together with PART): address -> (name, owner).
-    The name is the owner's NAMES entry, else its label, else Dааааа."""
+    The name is EXTNAMES of PART (unless not alias), else the owner's
+    NAMES entry, else its label, else Dааааа."""
     rng = ranges()
     lo, hi = rng[part]
     res = {}
@@ -332,6 +337,11 @@ def ext_map(part):
         for x in re.findall(r"(?<![А-ЯA-Z0-9'])[А-ЯA-Z][А-ЯA-Z0-9]*", re.sub(r"'[^']*'", '', t[-2])):
             if x in inv and inv[x][0] not in out:
                 out[inv[x][0]] = (x, inv[x][1])
+    if alias:
+        for a, n in load_notes(part).get('EXTNAMES', {}).items():
+            if a not in out:
+                sys.exit('%s: EXTNAMES %s %s: not an address of another part' % (part, a, n))
+            out[a] = (n, out[a][1])
     return out
 
 
@@ -349,7 +359,7 @@ def exports(name):
         for a, u in segref.items():         # a shared entry: all export it
             if isinstance(u, list) and name in u:
                 res[a] = load_notes(name)['NAMES'][a]
-        res.update({a: n for a, (n, u) in ext_map(other).items() if u == name})
+        res.update({a: n for a, (n, u) in ext_map(other, False).items() if u == name})
     return res
 
 
@@ -439,13 +449,13 @@ def make(name):
     byaddr = {}
     for n, a in sorted(amap.items()):
         byaddr.setdefault(a, n)
-    # ERRJUMP = ['01430']: УИА X(Мr) just before ПБ to one of these
+    # ERRJUMP = ['01430']: УИА X(Мr) just before ПБ/ПЕ/ПО to one of these
     # addresses loads an error code, not an address: X is an octal number
     errj = '|'.join(notes.get('ERRJUMP', []))
     errcode = set()                 # source lines of such УИА
     for i, l in enumerate(L[:-1]):
         m = re.fullmatch(r'(\S*\tуиа\t)(?:[GD]([0-7]{5})([+-]\d+)?|(\d+))\((М\d+)\)', l)
-        if errj and m and re.fullmatch(r'\tпб\t[GD](%s)' % errj, L[i + 1]):
+        if errj and m and re.fullmatch(r'\t(пб|пе|по)\t[GD](%s)' % errj, L[i + 1]):
             v = int(m.group(2), 8) + int(m.group(3) or 0) if m.group(2) else int(m.group(4))
             L[i] = "%s'%o'(%s)" % (m.group(1), v, m.group(5))
             errcode.add(i + 1)
@@ -1064,11 +1074,16 @@ def make(name):
         expo = {a: grp.get(n, (n,))[0] for a, n in expo.items()}
     # externals and entries go after the СТАРТ/М header
     head = []
-    imp = {}                        # owner -> names
+    imp, pairs = {}, {}             # owner -> names, (own, its) names
+    en = notes.get('EXTNAMES', {})
+    real = ext_map(name, False) if en else {}
     for a2 in used_ext:
-        imp.setdefault(owner[a2][1], set()).add(used_ext[a2])
-    for u in sorted(imp):
-        for c in chunks(sorted(imp[u])):
+        if a2 in en:
+            pairs.setdefault(owner[a2][1], set()).add('(%s,%s)' % (en[a2], real[a2][0]))
+        else:
+            imp.setdefault(owner[a2][1], set()).add(used_ext[a2])
+    for u in sorted(imp.keys() | pairs.keys()):
+        for c in chunks(sorted(imp.get(u, ()))) + chunks(sorted(pairs.get(u, ())), 3):
             head.append('%s\tвнеш\t%s' % (mods[u], ','.join(c)))
     for c in chunks(sorted(set(expo.values()))):
         head.append('\tвход\t' + ','.join(c))

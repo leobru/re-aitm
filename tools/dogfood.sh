@@ -11,21 +11,26 @@
 # linked program.  traces/dog/cmp.txt: the stored root and segments
 # against the parts (tools/itmcmp.py) and the volume against the one
 # tools/itmload.py --store makes from the same library (tools/volcmp.py);
-# then the stored АИТМЗ translates and runs itm/privet.itm.
+# then the stored АИТМЗ translates and runs itm/privet.itm.  Key П: the
+# listing of every translation (text, addresses, code) is in
+# traces/dog/PART.txt (aitm.txt for АИТМ).
 set -e
 T=traces/dog
 mkdir -p $T
 prev=
-k=РАНГК
+k=ПРАНГК
 for pm in aitm6:АИТМ6 f1a:ФАЗ1А f1b:ФАЗ1Б f2a:ФАЗ2А f2b:ФАЗ2Б f2c:ФАЗ2В; do
     p=${pm%%:*}; m=${pm##*:}
     tools/itmdeck.py itm/$p.itm "$k,$m!" --tape '67(2222-ЗП)' -o $T/$p.b6
     VOLIN=$prev VOLOUT=$T/$p.vol tools/dispakrun.sh $T/$p.b6 $T/$p.txt
-    if grep -q ОШИБКА $T/$p.txt; then echo "$p: ошибки трансляции"; exit 1; fi
-    prev=$T/$p.vol; k=РАГК
+    # an error: ОШИБКА and its number end a short line (a listing line
+    # ends with the code, its notes may have the word too)
+    if awk 'length < 90 && /ОШИБКА +[0-9]+ *$|^ *В ТЕКСТЕ ОШИБКА/ {e = 1} END {exit !e}' $T/$p.txt ||
+            ! grep -q 'КОНЕЦ ЗАДАЧИ' $T/$p.txt; then echo "$p: ошибки трансляции"; exit 1; fi
+    prev=$T/$p.vol; k=ПРАГК
 done
 KEY='АИТМЗ:АИТМ(АИТМ6+ФАЗ1А+ФАЗ1Б/ФАЗ2А+ФАЗ2Б/ФАЗ2В)!'
-tools/itmdeck.py itm/aitm.itm "РАГК,$KEY" --tape '67(2222-ЗП)' -o $T/aitm.b6
+tools/itmdeck.py itm/aitm.itm "ПРАГК,$KEY" --tape '67(2222-ЗП)' -o $T/aitm.b6
 VOL2148=traces/zagr.2148 VOLIN=$prev VOLOUT=$T/aitm.vol tools/dispakrun.sh $T/aitm.b6 $T/aitm.txt
 grep 'ЗАГР: ЗАПИСАНО' $T/aitm.txt
 # reference: the same job with the probe in zone 0414 (no linking), then itmload

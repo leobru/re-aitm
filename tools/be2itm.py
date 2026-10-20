@@ -99,7 +99,8 @@ BYMOD = {m: p for p, (m, a, n) in PARTS.items()}
 
 def layout(name):
     """{address: [left src, right src] or ('data', src)}, labels
-    {name: address}, source lines and external names {name: part} (from
+    {name: address}, source lines and external names {name: (part, its
+    name there)} (from
     the внеш lines) of a part, from its listing and source."""
     src = open('parts/%s.be' % name, encoding='utf-8').read().split('\n')
     lay, labels = {}, {}
@@ -107,8 +108,9 @@ def layout(name):
     for l in src:
         f = l.split('\t')
         if len(f) > 2 and f[1] == 'внеш':
-            for x in f[2].split(','):
-                ext[x.strip()] = BYMOD[f[0]]
+            # ИМЯ or (СВОЕ,ВНЕШНЕЕ): the own name of an external one
+            for x, y, z in re.findall(r'\(([^,()]+),([^,()]+)\)|([^,()]+)', f[2]):
+                ext[(x or z).strip()] = (BYMOD[f[0]], (y or z).strip())
     addr, half = None, 0
     for l in open('parts/%s.be.lst' % name, encoding='utf-8'):
         a, code, n = l[25:30], l[31:48], l[55:59]
@@ -127,7 +129,7 @@ def layout(name):
             labels.setdefault(f[0], addr)
         if op == 'пам':
             for i in range(int(f[2])):
-                lay[addr + i] = ('data', None)
+                lay[addr + i] = ('data', None if i else n)
             addr += int(f[2]) - 1
             half = 2
             continue
@@ -148,6 +150,49 @@ def layout(name):
         if half == 2:
             pass
     return lay, labels, src, ext
+
+
+def note(t):
+    """A comment as ITM notes ‘...‘ of at most 35 characters: the listing
+    prints a note in columns 62-96, the address and code overwrite the
+    rest, and only the first note after a statement is printed;
+    capitals, only characters a card can carry (‘ ends a note); no '!'
+    and ';': phase 1 looks for the end of the text and for sections Б;
+    without regard to notes."""
+    t = ' '.join(t.upper().replace('Ё', 'Е').split())
+    for a, b in (('‘', '"'), ("'", '’'), ('«', '"'), ('»', '"'),
+                 ('{', '('), ('}', ')'), ('?', ''), ('!', 'ВОСКЛ.'), (';', '.')):
+        t = t.replace(a, b)
+    out = []
+    while t:
+        cut = len(t) if len(t) <= 35 else (t.rfind(' ', 0, 36) if ' ' in t[:36] else 35)
+        out.append('‘%s‘' % t[:cut].strip())
+        t = t[cut:].strip()
+    return out
+
+
+def comments(p, src):
+    """Comments of part p: {source line: block comment lines before it},
+    {source line: its end-of-line comment}, {label: NAMES comment}."""
+    block, inline, names = {}, {}, {}
+    run = []
+    for i, l in enumerate(src, 1):
+        if l.startswith('*'):
+            if l.strip('* ') and not re.search('[a-z]', l):    # not disbesm6's
+                run.append(l[1:].strip())
+            continue
+        f = l.split('\t')
+        if run and len(f) > 1 and f[1] not in ('внеш', 'вход'):
+            block[i] = run
+        run = []
+        if len(f) > 3 and f[1] not in ('конд', 'текст') and ' '.join(f[3:]).strip():
+            inline[i] = ' '.join(f[3:]).strip()
+    pat = r"^ '([0-7]{5})': '([^']+)',\s*# (.*)$"
+    fn = 'notes/%s.py' % p
+    if os.path.exists(fn):
+        for a, n, c in re.findall(pat, open(fn, encoding='utf-8').read(), re.M):
+            names[n] = c
+    return block, inline, names
 
 
 def operand_syms(text):
@@ -173,8 +218,12 @@ def main():
         if x in labels:
             return p, labels[x]
         if x in ext:
-            return ext[x], lays[ext[x]][1][x]
+            return ext[x][0], lays[ext[x][0]][1][ext[x][1]]
         return None
+
+    def xname(p, x):
+        """The name in its owner of name x used in part p."""
+        return lays[p][3].get(x, (None, x))[1]
     def packed(p, w):
         """[(field, part, label, offset)] of a packed address word."""
         fs = []
@@ -205,7 +254,7 @@ def main():
                     sp, so = SEG[MODULE[p]], SEG[MODULE[o[0]]]
                     if so == 0 or sp == 0 or so == sp:
                         used.setdefault(p, set()).add(x)
-                        exported.add((o[0], x))
+                        exported.add((o[0], xname(p, x)))
     # a shared entry of phases (a list in SEGREF of tools/mkbe.py notes):
     # the same label at the same address, every part of the list exports it
     from mkbe import load_notes
@@ -216,10 +265,15 @@ def main():
                     exported.add((q, next(x for x, v in lays[q][1].items()
                                           if v == int(a, 8))))
     base = PARTS[parts[0]][1] or 1          # aitm0: word 0 is not loaded
-    externals = sorted({x for p in parts for x in used.get(p, ())})
-    body = ['В;', 'Э;НАЗ:П=%o,' % base]
+    externals = sorted({(x, xname(p, x)) for p in parts for x in used.get(p, ())})
+    body = ['В;']                   # before it the translator reads keys
+    for p in parts:
+        fn = 'notes/%s.py' % p
+        if os.path.exists(fn):
+            body += note(open(fn, encoding='utf-8').readline().lstrip('# '))
+    body += ['Э;НАЗ:П=%o,' % base]
     for i in range(0, len(externals), 3):
-        body.append('Э;' + ''.join('%s:Н=%s,' % (s, s) for s in externals[i:i + 3]))
+        body.append('Э;' + ''.join('%s:Н=%s,' % s for s in externals[i:i + 3]))
     body.append('В;')
     section = None
     for k, p in enumerate(parts):
@@ -230,13 +284,28 @@ def main():
         if k:
             body.append('Н;%o,' % (start + 0o10 - base))
             section = None
-        at = {v: n for n, v in labels.items()}
+        at = {}                     # address -> its labels, own one first
+        for n, v in labels.items():
+            at.setdefault(v, []).append(n)
+        block, inline, names = comments(p, src)
+
+        def tail(st, labs, ns):
+            """The statement with the comments of its labels and lines."""
+            cs = [names[x] for x in labs if x in names] + \
+                [inline[n] for n in ns if n in inline]
+            ls = note('; '.join(cs)) if cs else []
+            if ls and len(st) + len(ls[0]) <= 72:
+                return [st + ls[0]] + ls[1:]
+            return [st] + ls
         for i in range(first, len(ws)):
             a = start + i
             w = ws[i]
-            lab = at.get(a)
-            lab = (('*' if (p, lab) in exported else '') + lab + ':') if lab else ''
+            lab0 = at.get(a, [])
+            lab = ''.join(('*' if (p, x) in exported else '') + x + ':' for x in lab0)
             entry = lay.get(a)
+            ns = [n for n in ([entry[1]] if isinstance(entry, tuple) else entry or []) if n]
+            if ns and ns[0] in block:
+                body += note(' '.join(block[ns[0]]))
             if p in PACKED and PACKED[p][0] <= a < PACKED[p][1]:
                 if section != 'Л':
                     body.append('Л;')
@@ -255,8 +324,10 @@ def main():
                     body.append('С;')
                     section = 'С'
                 c = n and not t and re.search(r"ITM '(.*)'", src[n - 1])
-                body.append('%s%s,%s' % (lab, t or '%o' % w,
-                                         '‘%s‘' % c.group(1) if c else ''))
+                if c:
+                    body.append('%s%s,‘%s‘' % (lab, '%o' % w, c.group(1)))
+                else:
+                    body += tail('%s%s,' % (lab, t or '%o' % w), lab0, [])
                 continue
             halves = []
             for h, n in zip((w >> 24, w & 0o77777777), entry):
@@ -264,7 +335,7 @@ def main():
             if section != 'К':
                 body.append('К;')
                 section = 'К'
-            body.append('%s%s=%s,' % (lab, halves[0], halves[1]))
+            body += tail('%s%s=%s,' % (lab, halves[0], halves[1]), lab0, ns)
     body += ['Е;', 'Е;']
     print('\n'.join(body), file=out)
 

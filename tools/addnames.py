@@ -2,7 +2,9 @@
 """Add names to the NAMES dict of notes/PART.py: an entry goes before the
 first one with a higher address, the other lines stay where they are.
 
-Usage: tools/addnames.py PART < LIST
+Usage: tools/addnames.py [-e] PART < LIST
+
+-e: into EXTNAMES (names of other parts' cells in PART, made if missing).
 
 LIST lines: 'ааааа ИМЯ комментарий'.  An existing entry of the address
 is replaced.  Checks that the name is a valid label (a letter, then up
@@ -15,7 +17,8 @@ import sys
 
 
 def main():
-    part = sys.argv[1]
+    key = 'EXTNAMES' if sys.argv[1] == '-e' else 'NAMES'
+    part = sys.argv[-1]
     fn = 'notes/%s.py' % part
     text = open(fn, encoding='utf-8').read()
     new = {}
@@ -35,7 +38,9 @@ def main():
         other = {x for x in taken.get(n, set()) if x != (fn, a)}
         if other and not n.startswith('Ф'):
             sys.exit('%s: name taken by %s' % (n, sorted(other)))
-    m = re.search(r'^NAMES = \{\n(.*?)^\}', text, re.M | re.S)
+    if key == 'EXTNAMES' and not re.search(r'^EXTNAMES = \{', text, re.M):
+        text = text.replace('NAMES = {', 'EXTNAMES = {\n}\n\nNAMES = {', 1)
+    m = re.search(r'^%s = \{\n(.*?)^\}' % key, text, re.M | re.S)
     lines = m.group(1).split('\n')[:-1]
     for a, (n, c) in sorted(new.items()):
         s = " '%s': '%s'," % (a, n)
