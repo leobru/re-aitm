@@ -61,13 +61,19 @@
 #            when the operand is empty);
 #   KEEPEXEC = True                     a zero word that was executed
 #            (parts/NAME.cov) stays ЗП/ЗП instead of ПАМ.
-import importlib.util, os, re, subprocess, sys
+import ast, importlib.util, os, re, subprocess, sys
 
 
 def load_notes(name):
     fn = 'notes/%s.py' % name
     if not os.path.exists(fn):
         return {}
+    # a key given twice in a dict of the notes: Python keeps the last
+    for node in ast.walk(ast.parse(open(fn, encoding='utf-8').read())):
+        if isinstance(node, ast.Dict):
+            ks = [k.value for k in node.keys if isinstance(k, ast.Constant)]
+            if len(ks) != len(set(ks)):
+                sys.exit('%s: keys given twice: %s' % (fn, sorted({k for k in ks if ks.count(k) > 1})))
     spec = importlib.util.spec_from_file_location('notes_' + name, fn)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
