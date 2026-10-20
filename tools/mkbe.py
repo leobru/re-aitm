@@ -43,6 +43,9 @@
 #   EXTNAMES = {'04007': 'ВЛОЖ'}       own names of addresses of other parts
 #            (of USES or SEGREF), where the cell means here something else
 #            than in its owner or in other phases: ВНЕШ (ВЛОЖ,D04007);
+#   MASKNAMES = {'01546': 'Е3'}         a second name of a constant of this
+#            part (ИМЯ ЭКВ its name) for the commands И, ИЛИ, НТЖ that use
+#            it as a bit mask, in this part and in the parts that use it;
 #   ERRJUMP = ['01430']                 УИА X(Мr) right before ПБ, ПЕ or ПО
 #            to one of these addresses loads an error code: X is written
 #            as a number;
@@ -343,6 +346,37 @@ def ext_map(part, alias=True):
                 sys.exit('%s: EXTNAMES %s %s: not an address of another part' % (part, a, n))
             out[a] = (n, out[a][1])
     return out
+
+
+MASKOPS = ('и', 'или', 'нтж')
+
+
+def masknames():
+    """MASKNAMES of all parts: name -> (its mask name, owner part)."""
+    res = {}
+    for fn in sorted(os.listdir('notes')):
+        p = fn[:-3]
+        if fn.endswith('.py'):
+            for a, n in load_notes(p).get('MASKNAMES', {}).items():
+                res[load_notes(p)['NAMES'][a]] = (n, p)
+    return res
+
+
+def extops(name, a):
+    """The operations of the other parts with address a of NAME."""
+    rng = ranges()
+    res = set()
+    for fn in sorted(os.listdir('notes')):
+        other = fn[:-3]
+        if not fn.endswith('.py') or other == name or \
+                ext_map(other).get(a, (0, 0))[1] != name:
+            continue
+        for l in open('parts/%s.dis' % other, encoding='utf-8'):
+            f = l.rstrip('\n').split('\t')
+            if len(f) >= 3 and \
+                    int(a, 8) in [x for b, e, x in litaddrs(f[1], f[2], *rng[other])]:
+                res.add(f[1])
+    return res
 
 
 def exports(name):
@@ -1072,6 +1106,30 @@ def make(name):
         for a in used_ext:
             used_ext[a] = grp.get(used_ext[a], (used_ext[a],))[0]
         expo = {a: grp.get(n, (n,))[0] for a, n in expo.items()}
+    # MASKNAMES: the second name of a constant in И, ИЛИ, НТЖ
+    mn = masknames()
+    mused = {}                      # owner -> its mask names used here
+    for k, l in enumerate(out):
+        f = l.split('\t')
+        m = len(f) >= 3 and f[1] in MASKOPS and \
+            re.fullmatch(r'([А-ЯA-Z][А-ЯA-Z0-9]*)(\(М\d+\))?', f[2])
+        if m and m.group(1) in mn and (mn[m.group(1)][1] == name or
+                                       m.group(1) in used_ext.values()):
+            f[2] = mn[m.group(1)][0] + (m.group(2) or '')
+            out[k] = '\t'.join(f)
+            if mn[m.group(1)][1] != name:
+                mused.setdefault(mn[m.group(1)][1], set()).add(mn[m.group(1)][0])
+    if mused:                       # names left only in mask commands
+        toks = set()
+        for l in out:
+            f = l.split('\t')
+            if len(f) >= 3 and not l.startswith('*'):
+                toks.update(re.findall(r'[А-ЯA-Z][А-ЯA-Z0-9]*', f[2]))
+        used_ext = {a: n for a, n in used_ext.items() if n not in mn or n in toks}
+    own_masks = {n: names[a] for a, n in notes.get('MASKNAMES', {}).items()}
+    if own_masks:
+        fin = next(k for k, l in enumerate(out) if l.startswith('\tФИНИШ'))
+        out[fin:fin] = ['%s\tэкв\t%s' % x for x in sorted(own_masks.items())]
     # externals and entries go after the СТАРТ/М header
     head = []
     imp, pairs = {}, {}             # owner -> names, (own, its) names
@@ -1082,9 +1140,19 @@ def make(name):
             pairs.setdefault(owner[a2][1], set()).add('(%s,%s)' % (en[a2], real[a2][0]))
         else:
             imp.setdefault(owner[a2][1], set()).add(used_ext[a2])
+    for u, ns in mused.items():
+        imp.setdefault(u, set()).update(ns)
     for u in sorted(imp.keys() | pairs.keys()):
         for c in chunks(sorted(imp.get(u, ()))) + chunks(sorted(pairs.get(u, ())), 3):
             head.append('%s\tвнеш\t%s' % (mods[u], ','.join(c)))
+    # a constant with a mask name: the names the other parts use
+    for a, n in notes.get('MASKNAMES', {}).items():
+        if a in expo:
+            ops = extops(name, a)
+            keep = ([expo[a]] if ops - set(MASKOPS) else []) + \
+                ([n] if ops & set(MASKOPS) else [])
+            del expo[a]
+            expo.update({'%s %s' % (a, x): x for x in keep})
     for c in chunks(sorted(set(expo.values()))):
         head.append('\tвход\t' + ','.join(c))
     out[2:2] = head

@@ -149,6 +149,10 @@ def layout(name):
         half += 1
         if half == 2:
             pass
+    for l in src:                   # ИМЯ ЭКВ МЕТКА: a second label
+        m = re.fullmatch(r'(\S+)\tэкв\t([А-ЯA-Z][А-ЯA-Z0-9]*)', l)
+        if m and m.group(2) in labels:
+            labels[m.group(1)] = labels[m.group(2)]
     return lay, labels, src, ext
 
 
