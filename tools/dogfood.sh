@@ -32,12 +32,14 @@ grep 'ЗАГР: ЗАПИСАНО' $T/aitm.txt
 VOL2148=traces/z14mock.2148 VOLIN=$prev VOLOUT=$T/pre.vol tools/dispakrun.sh $T/aitm.b6 $T/pre.txt
 tools/itmload.py "РАК,${KEY#*:}" $T/pre.vol --store АИТМЗ $T/ref.vol > /dev/null
 { tools/itmcmp.py stored $T/aitm.vol АИТМЗ; tools/volcmp.py $T/aitm.vol $T/ref.vol; } > $T/cmp.txt
-# the stored АИТМЗ at work: itm/privet.itm with the translator loaded from
-# the record (itmdeck --stored) prints the same as with the zones of 2148
+# the stored АИТМЗ at work: the deck of АИТМ with the library volume as
+# ЛЕНТ 40 and the drum offset of the record (itmdeck --stored; dispak
+# --725 counts it in zones): the translator reads itself from the record
+# and prints for itm/privet.itm the same as from the zones of 2148
 tools/itmdeck.py itm/privet.itm 'П' -o $T/privet0.b6
 tools/dispakrun.sh $T/privet0.b6 $T/privet0.txt
 tools/itmdeck.py itm/privet.itm 'П' --stored $T/aitm.vol АИТМЗ -o $T/privet.b6
-VOLIN=$T/aitm.vol tools/dispakrun.sh $T/privet.b6 $T/privet.txt
+DISPAK_OPTS=--725 VOLIN=$T/aitm.vol tools/dispakrun.sh $T/privet.b6 $T/privet.txt
 grep -q 'ПРИВЕТ ВСЕМУ' $T/privet.txt
 cmp -s $T/privet0.txt $T/privet.txt
 echo 'АИТМЗ: «ПРИВЕТ ВСЕМУ», печать как у АИТМ 2148' >> $T/cmp.txt

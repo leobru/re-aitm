@@ -11,10 +11,14 @@ whatever their number.  KEYS is the key line before В; (e.g.
 'РАГК,ФАЗ1А!'), the text is the program from В; to the last Е;.
 
 With --stored VOL NAME the translator is the program NAME stored by zagr
-or itmload --store on the library volume VOL (АИТМЗ, make dogfood): the
-deck loads its root and segment 1 (phase 1) from the record instead of
-the zones of 2148, and a starter at 027770 enters 010 with A = 06776 + N.
-Phase 2 is still read from 2148 (ЛЕНТ 40) by the translator's own Э70.
+or itmload --store on the library volume VOL (АИТМЗ, make dogfood).  The
+deck is the same, but ЛЕНТ 40 is the library volume (it is 2222 in
+tools/dispakrun.sh) and the drum offset of Э50 0112 is the zone of лист
+0 of the record minus 06: the stored translator is laid out as on 2148
+(itmload.write_program), so its own Э70 words for zones 06-012 of drum
+21 read it from the record.  Run it with dispak --725, which counts the
+offset in zones (without it, in units of 040 zones):
+DISPAK_OPTS=--725 VOLIN=VOL tools/dispakrun.sh job.b6 out.txt.
 """
 import argparse
 import os
@@ -27,7 +31,7 @@ HEAD = '''ШИФР 419900000012^
 ВХОД 4237^
 ФИЗО МБ21^
 РОСП 0^
-ЛЕНТ 40(2148)^
+ЛЕНТ 40(%s)^
 %sВРЕМ 600^
 СПЕЦ^
 Е
@@ -38,7 +42,7 @@ K 00 000 0000
 К 00 010 4243 00 050 0112
 К 00 070 4244
 К 00 010 0003 00 30 06770
-С 0000 0000 0040 0010
+С 0000 0000 0040 %04o
 С 4014 0301 0021 0111
 C 0000 1000 0023 0000
 В 7000
@@ -46,36 +50,17 @@ C 0000 1000 0023 0000
 '''
 
 
-def stored(spec, acc, tapes):
-    """Head of a deck that loads the stored program and starts it."""
+def offset(spec):
+    """Drum offset of the program stored on the library volume."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import itmload
     from vol import zones
     path, z0 = itmload.library(spec[0])
     zs = zones(path)
     cat = itmload.catalogue(zs, z0)
-    root, start, tab, segs, exports = itmload.read_program(zs, z0, cat[itmload.word(spec[1])])
-    blocks = [(1, root[1:])]
-    for x in segs[0] if segs else []:
-        addr, z, k = itmload.unpack_e70(x)
-        blocks.append((addr, zs[z][k * itmload.SECTOR:(k + 1) * itmload.SECTOR]))
-    long_ = lambda ir, op, a: ir << 20 | 1 << 19 | (op & 0o17) << 15 | a
-    short = lambda ir, op, a: ir << 20 | op << 12 | a
-    # as the deck and ЗАГР (aitm6 06770) do: Э50 0112 - volume 040 (2148)
-    # from zone 0400 (an extracode in the right half: after it execution
-    # goes on with the next word); A = 06776 + N, М1 = М2 = 0, М16 = 06777
-    starter = [long_(1, 0o24, 0o27776) << 24 | short(1, 0o10, 0),  # уиа; сч (М1)
-               long_(0, 0o22, 0) << 24 | short(0, 0o50, 0o112),    # мода; Э50
-               long_(1, 0o24, 0o27777) << 24 | short(1, 0o10, 0),  # уиа; сч (М1)
-               long_(1, 0o24, 0) << 24 | long_(0o16, 0o24, 0o6777),  # уиа М1, М16
-               long_(0, 0o30, start) << 24,                         # пб пуск
-               0, 0o0000000000400010, acc]                          # 027776, 027777
-    out = HEAD.split('В 3\n')[0].replace('ВХОД 4237', 'ВХОД 27770') % tapes
-    for base, ws in blocks + [(0o27770, starter)]:
-        out += 'В %o\n' % base
-        for w in ws:
-            out += 'К %s %s\n' % (itmload.kcard(w >> 24), itmload.kcard(w & 0o77777777))
-    return out + 'В 7000\nА0\n'
+    if itmload.word(spec[1]) not in cat:
+        sys.exit('%s нет в каталоге' % spec[1])
+    return itmload.read_program(zs, z0, cat[itmload.word(spec[1])])[5] - 0o6
 
 
 def main():
@@ -92,9 +77,9 @@ def main():
         raise SystemExit('текст длиннее памяти 07000-051777')
     s = '%016o' % (0o6776 + n)
     tapes = ''.join('ЛЕНТ %s^\n' % t for t in a.tape)
-    job = HEAD % (tapes, ' '.join(s[i:i + 4] for i in range(0, 16, 4))) + body + '_$\nЕКОНЕЦ\n'
-    if a.stored:
-        job = stored(a.stored, 0o6776 + n, tapes) + body + '_$\nЕКОНЕЦ\n'
+    vol, off = ('2222', offset(a.stored)) if a.stored else ('2148', 0o10)
+    job = HEAD % (vol, tapes, ' '.join(s[i:i + 4] for i in range(0, 16, 4)), off) \
+        + body + '_$\nЕКОНЕЦ\n'
     if a.out:
         open(a.out, 'w', encoding='utf-8').write(job)
     else:

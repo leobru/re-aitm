@@ -66,7 +66,7 @@ def main():
         mem = {md.base + i: w for i, w in enumerate(md.image)}
         bad = compare(mem, parts, name, [p for p in parts if be2itm.MODULE[p] == name])
     else:
-        root, start, tab, segs, exports = itmload.read_program(zs, z0, cat[itmload.word(name)])
+        root, start, tab, segs, exports, img = itmload.read_program(zs, z0, cat[itmload.word(name)])
         seg = {p: be2itm.SEG[be2itm.MODULE[p]] for p in parts}
         bad = compare(dict(enumerate(root)), parts, 'корень', [p for p in parts if seg[p] == 0])
         for s, e in enumerate(segs, 1):

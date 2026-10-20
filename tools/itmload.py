@@ -303,13 +303,25 @@ def rootnaz(mods):
 
 
 def write_program(path, out, z0, name, mods, spans, table, start, names):
-    """Store the linked program in a copy of the volume path as out:
-      word 0  root length << 33 | segments << 22
-      word 1  export words << 36 | table address << 15 | start
-      root image (from address 0, with the table of Э70 words), export table
-      (name, address) of the root names, then the segments, each from a
-      sector boundary, as the table reads them.  Catalogue descriptor:
-      bit 48 = 0 (a stored program), words << 32, first zone."""
+    """Store the linked program in a copy of the volume path as out, laid
+    out as АИТМ is on 2148 (zones 0406-0412), from the first free zone F:
+      zones F .. F+H-1  word 0  root length << 33 | segments << 22
+                        word 1  export words << 36 | table address << 15
+                                | start
+                        the export table (name, address) of the root
+                        names, zeros to the end of the zone;
+      zones F+H ..      the image of the root and segment 1 as they stand
+                        in memory at the start: лист k in zone F+H+k;
+      then              the other segments: a whole лист of a segment
+                        gets a zone of its own after the image, its other
+                        sectors go to the free sectors of the image (no
+                        module of the root or of segment 1, not the
+                        table), in order, and then to further zones.
+    The table of Э70 words in the root reads each sector of each segment
+    from its place.  So a program that reads its overlays with its own
+    Э70 words from fixed zones (АИТМ: zones 06-012 of drum 21) finds them
+    with the drum offset F+H-06.  Catalogue descriptor: bit 48 = 0 (a
+    stored program), words << 32, F."""
     b = bytearray(open(path, 'rb').read())
 
     def zone(z):
@@ -336,38 +348,72 @@ def write_program(path, out, z0, name, mods, spans, table, start, names):
     first = get(z0, i + 1) or 1
 
     core = {}
+    used = set()                            # sectors of the root and segment 1
     for md in mods:
         for j, w in enumerate(md.image):
             core[(md.seg, md.base + j)] = w
+        if md.seg <= 1:
+            used.update(range(md.base // SECTOR, -(-(md.base + len(md.image)) // SECTOR)))
     tab = mods[0].base + len(mods[0].image)
+    used.update(range(tab // SECTOR, -(-(tab + len(table)) // SECTOR)))
     rootend = max([tab + len(table)] + [md.base + len(md.image) for md in mods if md.seg == 0])
     exports = [(n, d[0][0]) for n, d in names.items() if 0 in d]
-    rec = [0, 0] + [core.get((0, a), 0) for a in range(rootend)]
+    head = [rootend << 33 | len(spans) << 22, 2 * len(exports) << 36 | tab << 15 | start]
     for n, v in exports:
-        rec += [n, v]
-    sec = -(-len(rec) // SECTOR)
-    t, data = [], {}
+        head += [n, v]
+    h = -(-len(head) // 1024)
+    img = first + h                         # zone of лист 0
+    end1 = max([rootend] + [spans[1][1]] if 1 in spans else [rootend])
+    pages = -(-end1 // 1024)
+    free = [q for q in range(4 * pages) if q not in used]
+    nxt, over = img + pages, None           # next free zone, a zone being filled
+    place = {}                              # (segment, address) -> (zone, sector)
     for s in sorted(spans):
         a0, a1 = spans[s]
         if a0 % SECTOR:
             raise LoadError('сегмент %d начинается с %05o, не с границы абзаца' % (s, a0))
-        for a in range(a0, a1, SECTOR):
-            t.append(e70(a, z0 + first + sec // 4, sec % 4))
-            data[sec] = [core.get((s, x), 0) for x in range(a, a + SECTOR)]
-            sec += 1
-        t.append(0)
+        a = a0
+        while a < a1:
+            if s == 1:
+                place[(s, a)] = (img + a // 1024, a // SECTOR % 4)
+                a += SECTOR
+            elif a % 1024 == 0 and a + 1024 <= a1:
+                for k in range(4):
+                    place[(s, a + k * SECTOR)] = (nxt, k)
+                nxt, a = nxt + 1, a + 1024
+            else:
+                if free:
+                    q = free.pop(0)
+                    place[(s, a)] = (img + q // 4, q % 4)
+                else:
+                    if over is None or over[1] == 4:
+                        over, nxt = [nxt, 0], nxt + 1
+                    place[(s, a)] = (over[0], over[1])
+                    over[1] += 1
+                a += SECTOR
+    t = []
+    for s in sorted(spans):
+        a0, a1 = spans[s]
+        t += [e70(a, *place[(s, a)]) for a in range(a0, a1, SECTOR)] + [0]
     assert len(t) == len(table)
-    rec[2 + tab:2 + tab + len(t)] = t
-    rec[0] = rootend << 33 | len(spans) << 22
-    rec[1] = 2 * len(exports) << 36 | tab << 15 | start
-    for j, w in enumerate(rec):
-        put(z0 + first + j // 1024, j % 1024, w)
-    for k, ws in data.items():
-        for j, w in enumerate(ws):
-            put(z0 + first + k // 4, (k % 4) * SECTOR + j, w)
-    nz = -(-sec // 4)
+    for j, w in enumerate(t):
+        core[(0, tab + j)] = w
+    for j, w in enumerate(head):
+        put(first + j // 1024, j % 1024, w)
+    for j in range(len(head), h * 1024):
+        put(first + j // 1024, j % 1024, 0)
+    for a in range(pages * 1024):           # root over segment 1, as at the start
+        put(img + a // 1024, a % 1024, core.get((0, a), core.get((1, a), 0)))
+    for z in range(img + pages, nxt):
+        for j in range(1024):
+            put(z, j, 0)
+    for (s, a), (z, k) in place.items():
+        if s > 1:
+            for j in range(SECTOR):
+                put(z, k * SECTOR + j, core.get((s, a + j), 0))
+    nz = nxt - first
     put(z0, i, word(name))
-    put(z0, i + 1, sec * SECTOR << 32 | first)
+    put(z0, i + 1, nz * 1024 << 32 | first)
     put(z0, i + 2, 0)
     put(z0, i + 3, first + nz)
     open(out, 'wb').write(b)
@@ -375,13 +421,15 @@ def write_program(path, out, z0, name, mods, spans, table, start, names):
 
 
 def read_program(zs, z0, desc):
-    """Root image, start, table address, Э70 words of each segment and
-    exports of a stored program."""
-    w = [x for z in zs[z0 + (desc & 0o1777):] for x in z]
+    """Root image, start, table address, Э70 words of each segment,
+    exports and the zone of лист 0 of a stored program (write_program)."""
+    f = z0 + (desc & 0o1777)
+    w = [x for z in zs[f:] for x in z]
     n, nseg = w[0] >> 33, (w[0] >> 22) & 0o3777
     nexp, tab, start = w[1] >> 36, (w[1] >> 15) & M15, w[1] & M15
-    root = w[2:2 + n]
-    exports = [(w[i], w[i + 1]) for i in range(2 + n, 2 + n + nexp, 2)]
+    exports = [(w[i], w[i + 1]) for i in range(2, 2 + nexp, 2)]
+    h = -(-(2 + nexp) // 1024)
+    root = w[h * 1024:h * 1024 + n]
     segs, j = [], tab
     for _ in range(nseg):
         e = []
@@ -390,7 +438,7 @@ def read_program(zs, z0, desc):
             j += 1
         segs.append(e)
         j += 1
-    return root, start, tab, segs, exports
+    return root, start, tab, segs, exports, f + h
 
 
 # Output --------------------------------------------------------------
@@ -419,9 +467,10 @@ def job(blocks, start, out, vol=None):
 def run_stored(a, zs, z0, desc):
     """Job of a stored program: the root and segment --seg, read from the
     volume by its Э70 words; the volume is mounted as ЛЕНТ 67(--vol)."""
-    root, start, tab, segs, exports = read_program(zs, z0, desc)
-    print('программа: корень 00000-%05o, пуск %05o, таблица сегментов %05o'
-          % (len(root) - 1, start, tab))
+    root, start, tab, segs, exports, img = read_program(zs, z0, desc)
+    print('программа: корень 00000-%05o, пуск %05o, таблица сегментов %05o, '
+          'лист 0 в зоне %o (сдвиг барабана %o)'
+          % (len(root) - 1, start, tab, img, img - 0o6))
     blocks = [(1, root[1:])]                 # cell 0 is not loaded
     for s, e in enumerate(segs, 1):
         print('сегмент %d:' % s, ' '.join('%05o<-%o.%o' % unpack_e70(x) for x in e))

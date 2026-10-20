@@ -426,22 +426,47 @@ decoded from dispak `ddio`]:
 | 1–2 | sector in the zone |
 
 For example `4010410000670025` reads zone 5, sector 1 to 02000. The
-translator's own phase words (aitm6 06760–06763) have the same layout
-for drum 21, without the 04000.
+translator's own phase words (aitm6 06760–06763) are for drum 21 and
+lack the 04000. In them the right half is sector << 6 | zone:
+`4014020200210207` reads zone 07, sector 2, to 05000.
 
 The record is a new catalogue entry: the old entry with that name is
-freed (−1), and the record goes to the free zone. Its descriptor has
+freed (−1), and the record goes to the free zone F. Its descriptor has
 bit 48 = 0, which marks a stored program instead of a module. Bits
-33–47 hold the length in words, and bits 1–10 the first zone. The
-record itself:
+33–47 hold the length in words (whole zones), and bits 1–10 hold F.
 
-| Words | Contents |
+**The record is laid out as АИТМ is on 2148** (zones 0406–0412):
+
+| Zones | Contents |
 |---|---|
-| 0 | root length (from address 0, table included) << 33 \| segments << 22 |
-| 1 | export words << 36 \| table address << 15 \| start |
-| 2 … | root image from address 0, already linked (cell 0 is not loaded) |
-| then | exports: (name, address) of the root, `СЕГn` included |
-| from the next sector | the segments, sector after sector, as the table reads them |
+| F … F+H−1 | word 0: root length (from address 0, table included) << 33 \| segments << 22; word 1: export words << 36 \| table address << 15 \| start; then the exports (name, address) of the root, `СЕГn` included; zeros to the end of the zone |
+| F+H+k | лист k of the image of the root and segment 1, as they stand in memory at the start (cell 0 is 0) |
+| after the image | the other segments: a whole лист of a segment gets a zone of its own |
+
+The other sectors of segments 2, 3, … go to the free sectors of the
+image, in order. A sector is free if no module of the root or of
+segment 1, and not the table, lies in it. When there are no free
+sectors left, they go to further zones. A zone that is only partly
+filled is padded with zero sectors.
+
+So a program that reads its overlays by its own Э70 words from fixed
+zones finds them in the record. The drum offset for that is
+F + H − 06. АИТМ reads zones 06–012 of drum 21.
+
+**What the layout reproduces.** For `АИТМЗ`:
+- the image is zones 06, 07, 010 and 011.0–011.1;
+- `ФАЗ2А`, a whole лист, gets zone 012;
+- `ФАЗ2Б` goes to 07.1 and `ФАЗ2В` to 07.2–07.3, the free sectors of
+  the лист 02000–03777. In 07.0 is the table.
+
+Against 2148 0406–0412, three places differ:
+- word 0 of 0406 (the mark of cell 0);
+- 0407.0, where 2148 has the window contents and the record has the
+  table;
+- 0411.2–0411.3, where 2148 has the code that writes the translator to
+  the drum, which is not among the parts.
+
+[опыт]
 
 All words are written with the instruction tag (dispak keeps it in bit
 49 of a volume word), so code read by Э70 can be executed.
@@ -449,7 +474,8 @@ All words are written with the instruction tag (dispak keeps it in bit
 `tools/itmload.py 'ИМЯ!' LIB` recognises a stored program by bit 48.
 It does not link it again: the job loads the root and segment
 `--seg`, taken from the volume through the table, and mounts the volume
-as `ЛЕНТ 67(--vol)`. `tools/vol.py` prints such an entry as
+as `ЛЕНТ 67(--vol)`. It also prints the zone of лист 0 and the drum
+offset. `tools/vol.py` prints such an entry as
 `stored program`.
 
 Relocation follows sections 3–4:
@@ -533,7 +559,7 @@ page 0, where it is read:
 | 02000–03777 | pager windows |
 | 04000–05777 | key block, then the 067 catalogue |
 | 06000 | list; 06100–06477 module table (8 words per module; word 3 is the alignment mask, or the address with bit 16 for `НАЗ`) |
-| 06500–06642 | variables, cleared at the start (only `ИНФ` and `ПУСКА`, needed after pages 1 … L are read, stay in page 0) |
+| 06500–06654 | variables, cleared at the start (only `ИНФ` and `ПУСКА`, needed after pages 1 … L are read, stay in page 0) |
 | 07000–07377 | buffer of the name table |
 | 07400–07777 | sector buffer of the record being stored |
 | 010000–010377 | zeros for filling the image |
@@ -541,7 +567,7 @@ page 0, where it is read:
 | 030000–051774 | buffer for one library module (up to 9 zones) |
 | 051775–051777 | the starting stub |
 
-The code ends at 01632. `zagr/Makefile` fails the build when it would
+The code ends at 01775. `zagr/Makefile` fails the build when it would
 not fit in the zone.
 
 **Building through the pager.**
@@ -602,13 +628,18 @@ not fit in the zone.
    - the catalogue entry of the old program with that name is freed
      (−1), and the record goes to the free zone.
 
-   After pass 2 the loader writes, by sector exchanges on unit 067:
-   - the record, as a stream through the sector buffer: header, root
-     (read back from virtual memory), root exports, zeros to the end of
-     the last sector;
-   - every segment, read sector by sector from its virtual range;
-   - zero sectors up to the end of the zone, so that no filler of the
-     fresh zone is left. They are not counted in the length;
+   After pass 2 the loader writes, by sector exchanges on unit 067, the
+   layout of section 7:
+   - the head, as a stream through the sector buffer: header, root
+     exports, zeros to the end of the zone;
+   - the image, лист by лист. A sector in the range of segment 1 comes
+     from its virtual range, any other from the root's. The root's
+     range is cleared to the end of its лист;
+   - every sector of segments 2, 3, … to its place. `РАЗМ` gives the
+     place, as in `itmload`: a whole лист gets a new zone (`СЛЗ`),
+     another sector the next free sector of the image (`ЗАНЯТ`), then an
+     overflow zone, padded with zero sectors. The table of Э70 words is
+     built by the same `РАЗМ` before the image is written;
    - the catalogue (zone 0).
 
    It prints «ЗАГР: ЗАПИСАНО ИМЯ» and ends with Э74. The sector form of
@@ -644,6 +675,9 @@ the jobs order `ЛИСТ 0-24`.
 with `мода 0` in the left half. Execution then goes on in the next word,
 whose left half is the `дк 0,0` written after the extracode, i.e. a
 `зп` to cell 0. The translator uses that as a no-op too.
+
+The messages share one prefix word «ЗАГР: » in front of the message
+buffer. The code fills the zone up to 01775.
 
 **Check** (`make zagr`, `tools/memcmp.py`). Each job is translated with
 key `РАГК,ИМЯ(…)!` on a library volume of the `link`/`lib` chains. The
@@ -828,19 +862,18 @@ zone 013). The modules export 476 entries; with the `НАЗ` entries and
   `tools/itmload.py --store` writes from the same library.
 - Each module alone, placed at its `НАЗ`, also matches its parts
   (`tools/itmcmp.py module`).
-- **The stored `АИТМЗ` works.** `tools/itmdeck.py --stored VOL АИТМЗ`
-  makes a deck that loads its root and segment 1 (phase 1) from the
-  record. A starter at 027770 does what the deck's loader and `ЗАГР`
-  (aitm6 06770) do before `ПУСК1`:
-  - `Э50 0112`: volume 2148 from zone 0400 for physical drum 21;
-  - A = 06776 + N, М1 = М2 = 0, М16 = 06777;
-  - jump to 010.
+- **The stored `АИТМЗ` works from the library.** The job is the
+  translator's own deck (`tools/itmdeck.py --stored VOL АИТМЗ`), with
+  two changes:
+  - `ЛЕНТ 40` is the library volume;
+  - the offset of `Э50 0112` is the zone of лист 0 of the record minus
+    06 (6 for `АИТМЗ`, лист 0 in zone 014).
 
-  The extracode stands in the right half: after an extracode in the
-  left half, execution goes on with the next word. On `itm/privet.itm`
-  the printout, with the listing and «ПРИВЕТ ВСЕМУ», equals that of the
-  deck with АИТМ from the zones of 2148. Phase 2 still comes from 2148
-  by the translator's own Э70, since its code is unchanged.
+  dispak runs with `--725`, so the offset counts in zones; without it,
+  a volume ≥ 2048 counts in units of 040 zones. `ЗАГР` (aitm6 06770)
+  then reads the translator from the record, and so does every phase
+  change. On `itm/privet.itm` the printout, with the listing and
+  «ПРИВЕТ ВСЕМУ», equals that of the deck with АИТМ from 2148.
 
 **What it took in the loaders:**
 - the `НАЗ` placement;

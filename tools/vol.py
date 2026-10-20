@@ -4,7 +4,7 @@
 Usage: tools/vol.py 2222 > lib.txt
 
 An entry with descriptor bit 48 = 0 is a linked program stored by
-tools/itmload.py --store (AITM-object.md, section 7).
+tools/itmload.py --store or zagr (AITM-object.md, section 7).
 
 Zone 0 is the catalogue: pairs (name in ITM, right-justified; descriptor),
 terminated by a zero name whose second word is the first free zone.  A
@@ -78,18 +78,21 @@ def module(zs, z0):
 
 
 def program(zs, z0):
-    """Linked program stored by tools/itmload.py --store (descriptor bit
-    48 = 0): header, root image, Э70 table, exports."""
+    """Linked program stored by tools/itmload.py --store or zagr (descriptor
+    bit 48 = 0), laid out as АИТМ on 2148: header and exports up to the end
+    of the zone, then the image of the root and segment 1 by листы (the
+    other segments are in its free sectors and further zones)."""
     w = [x for z in zs[z0:] for x in z]
     n, nseg = w[0] >> 33, (w[0] >> 22) & 0o3777
     nexp, tab, start = w[1] >> 36, (w[1] >> 15) & 0o77777, w[1] & 0o77777
-    print('  stored program %016o %016o: root %o, segments %o, table %05o, start %05o'
-          % (w[0], w[1], n, nseg, tab, start))
-    for i, x in enumerate(w[2:2 + n]):
+    h = -(-(2 + nexp) // 1024)
+    print('  stored program %016o %016o: root %o, segments %o, table %05o, start %05o,'
+          ' лист 0 in zone %o' % (w[0], w[1], n, nseg, tab, start, z0 + h))
+    for i in range(2, 2 + nexp, 2):
+        print('    export %-6s %016o' % (itm(w[i]), w[i + 1]))
+    for i, x in enumerate(w[h * 1024:h * 1024 + n]):
         if i >= 0o10 or x:
             print('    %05o  %016o%s' % (i, x, '  Э70' if i >= tab and x else ''))
-    for i in range(2 + n, 2 + n + nexp, 2):
-        print('    export %-6s %016o' % (itm(w[i]), w[i + 1]))
 
 
 def main():
