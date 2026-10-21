@@ -53,6 +53,9 @@
 #   ERRJUMP = ['01430']                 УИА X(Мr) right before ПБ, ПЕ or ПО
 #            to one of these addresses loads an error code: X is written
 #            as a number;
+#   ADDRLIT = ['00620', ...]            short literals 'ааа' of these values in
+#            УИА, СЛИА, ПВ... (index register loads) are addresses too
+#            (a pointer to a cell given to a routine: УИА ПОЗЧТ(М2));
 #   NOTADDR = ['76001', ...]            literal values that are numbers (loop
 #            counters), not addresses in a part of USES: left as they are;
 #   TOP    = '''* ...'''                block comment after the СТАРТ lines;
@@ -258,18 +261,22 @@ ADDROPS = {'зп', 'зпм', 'счм', 'сл', 'вч', 'вчоб', 'вчаб', '
            'пио', 'пино', 'цикл'}
 
 
-def litaddrs(op, opnd, lo, hi):
+def litaddrs(op, opnd, lo, hi, short=()):
     """(start, end, address) of the literal addresses in the operand opnd
     of op: 'ааааа' (any number of digits for ADDROPS), a decimal number
     for ADDROPS, a label+N of a part at lo..hi that falls outside it (the
     disassembler writes an address after the part so). With an index
     register (not REGDEST) an address below 0100 is the offset of a field
-    and is left out."""
+    and is left out. short: values of ADDRLIT."""
     res = []
     ec = re.fullmatch(r'Э[67][0-7]', op)
     pat = LITADDR.replace('4,5', '1,5') if op in ADDROPS or ec else LITADDR
     for m in re.finditer(pat, opnd):
         res.append((m.start(), m.end(), int(m.group(1), 8)))
+    if op in REGDEST and pat == LITADDR:
+        for m in re.finditer(LITADDR.replace('4,5', '1,3'), opnd):
+            if int(m.group(1), 8) in short:
+                res.append((m.start(), m.end(), int(m.group(1), 8)))
     m = re.match(r'(\d+)(?=$|[(,])', opnd)
     if m and op in ADDROPS:
         res.append((m.start(), m.end(), int(m.group(1))))
@@ -279,6 +286,10 @@ def litaddrs(op, opnd, lo, hi):
             res.append((m.start(), m.end(), a))
     return [(b, e, a) for b, e, a in res if a and not (
         a < 0o100 and (ec or opnd[e:e + 2] == '(М' and op not in REGDEST))]
+
+
+def addrlit(part):
+    return {int(a, 8) for a in load_notes(part).get('ADDRLIT', [])}
 
 
 def ranges():
@@ -317,7 +328,7 @@ def ext_map(part, alias=True):
         f = l.rstrip('\n').split('\t')
         if len(f) < 3:
             continue
-        for b, e, a in litaddrs(f[1], f[2], lo, hi):
+        for b, e, a in litaddrs(f[1], f[2], lo, hi, addrlit(part)):
             if lo <= a < hi or a in notaddr:
                 continue
             if '%05o' % a in segref:
@@ -388,7 +399,7 @@ def extops(name, a):
         for l in open('parts/%s.dis' % other, encoding='utf-8'):
             f = l.rstrip('\n').split('\t')
             if len(f) >= 3 and \
-                    int(a, 8) in [x for b, e, x in litaddrs(f[1], f[2], *rng[other])]:
+                    int(a, 8) in [x for b, e, x in litaddrs(f[1], f[2], *rng[other], addrlit(other))]:
                 res.add(f[1])
     return res
 
@@ -811,7 +822,7 @@ def make(name):
             return rename.get(m.group(1), m.group(1))
         f = l.split('\t')
         if len(f) >= 3:             # a label+N of another part first
-            for b, e, a in reversed(litaddrs(f[1], f[2], plo, phi)):
+            for b, e, a in reversed(litaddrs(f[1], f[2], plo, phi, addrlit(name))):
                 if '%05o' % a in ext and re.match('[GD]', f[2][b:e]):
                     used_ext['%05o' % a] = ext['%05o' % a]
                     f[2] = f[2][:b] + ext['%05o' % a] + f[2][e:]
@@ -819,7 +830,7 @@ def make(name):
         l = re.sub(r'(?<![А-Я0-9A-Z])([GD][0-7]{5})(?![0-7])', r1, l)
         f = l.split('\t')
         if len(f) >= 3:
-            for b, e, a in reversed(litaddrs(f[1], f[2], plo, phi)):
+            for b, e, a in reversed(litaddrs(f[1], f[2], plo, phi, addrlit(name))):
                 a = '%05o' % a
                 if a in ext:
                     used_ext[a] = ext[a]
